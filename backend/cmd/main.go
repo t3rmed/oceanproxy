@@ -35,7 +35,8 @@ func main() {
 
 	r.Group(func(r chi.Router) {
 		r.Use(handlers.AuthMiddleware)
-		r.Post("/plan", handlers.CreatePlanHandler)
+		r.Post("/plan", handlers.CreatePlanHandler)                // proxies.fo
+		r.Post("/nettify/plan", handlers.CreateNettifyPlanHandler) // nettify
 		r.Get("/proxies", handlers.GetProxiesHandler)
 		r.Post("/restore", handlers.RestoreHandler)
 	})

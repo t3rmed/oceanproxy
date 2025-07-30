@@ -35,12 +35,14 @@ def my_plans():
     json_response = response.json()
     return json_response
 
-def create_plan(username, password, plan_type, bandwidth_mb, hours=None):
+def create_plan(username, password, plan_type, bandwidth, hours=None):
+    bandwidth_mb = bandwidth * 1024  # Convert GB to MB
     url = f"{BASE_URL}/plans/create"
     headers = {
         "Authorization": BEARER_TOKEN,
         "Content-Type": "application/json"
     }
+    
     if plan_type == 'unlimited':
         data = {
             "username": username,
@@ -55,7 +57,9 @@ def create_plan(username, password, plan_type, bandwidth_mb, hours=None):
         "bandwidth_mb": bandwidth_mb
     }
     response = requests.post(url, headers=headers, json=data)
-    return response.json()
+    plan_id = response.json().get("plan_id")
+    print(response.json())
+    return plan_id
 
 def get_plan_details(plan_id):
     url = f"{BASE_URL}/plans/{plan_id}"
@@ -85,7 +89,8 @@ def delete_plan(plan_id):
     response = requests.delete(url, headers=headers)
     return response.json()
 
-print(balance())
-# print(countries())
-print(my_plans())
-print(create_plan("user", "pass", "residential", 100))
+print("balance:", balance())
+print("countries:", countries())
+plan_id = create_plan("test_user", "password", "residential", 1)
+print("my plans:", my_plans())
+print("get_plan_details:", get_plan_details(plan_id))
