@@ -70,12 +70,12 @@ async def buy_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     keyboard = [
-        [InlineKeyboardButton("🌊 Residential", callback_data="buy_resi")],
+        [InlineKeyboardButton("🌊 Residential", callback_data="residential")],
         [
-            InlineKeyboardButton("👤 Datacenter", callback_data="buy_datacenter")
+            InlineKeyboardButton("👤 Datacenter", callback_data="datacenter")
         ],
         [
-            InlineKeyboardButton("💎 ISP", callback_data="buy_isp")
+            InlineKeyboardButton("💎 ISP", callback_data="isp")
         ],
         [
             InlineKeyboardButton("🔙 Back to main menu", callback_data="start"),
@@ -101,19 +101,23 @@ async def buy_proxy(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         
-async def buy_resi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def residential(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = update.effective_user
     buy_text = (
-        f"We have plenty to choose from\n"
-        "Please join our news channel @OceanProxyIO\n"
-        "By using our bot, you agree that you know what you are buying and agree to the [terms of use](https://example.com).\n"
-        "and with the section Rules and FAQ\n"
+        f"Our residential pool(s) contain over 150 million IPs from all over the world.\n"
+        "Please press the 'pricing' button to see our pricing.\n"
+        "Please press the 'info' button to see more information about our residential proxies.\n"
     )
     
     keyboard = [
-        [InlineKeyboardButton("🌊 Pricing", callback_data="resi_pricing"),
-         InlineKeyboardButton("👤 Info", callback_data="resi_info")],
+        [
+            InlineKeyboardButton("➡ Buy Now", callback_data="select_resi_plan"),
+        ],
+        [
+            InlineKeyboardButton("🌊 Pricing", url="https://oceanproxy.io/residential#pricing"),
+            InlineKeyboardButton("👤 Info", url="https://oceanproxy.io/residential#info")
+        ],
         [
             InlineKeyboardButton("🔙 Back to proxies menu", callback_data="buy_proxy"),
         ]
@@ -138,19 +142,18 @@ async def buy_resi(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
         
-async def buy_datacenter(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def datacenter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = update.effective_user
     buy_text = (
-        f"We have plenty to choose from\n"
-        "Please join our news channel @OceanProxyIO\n"
-        "By using our bot, you agree that you know what you are buying and agree to the [terms of use](https://example.com).\n"
-        "and with the section Rules and FAQ\n"
+        f"Our datacenter proxies are fast and reliable, perfect for scraping and automation tasks.\n"
+        "Please press the 'pricing' button to see our pricing.\n"
+        "Please press the 'info' button to see more information about our datacenter proxies.\n"
     )
     
     keyboard = [
-        [InlineKeyboardButton("🌊 Pricing", callback_data="resi_pricing"),
-         InlineKeyboardButton("👤 Info", callback_data="resi_info")],
+        [InlineKeyboardButton("🌊 Pricing", url="https://oceanproxy.io/datacenter#pricing"),
+         InlineKeyboardButton("👤 Info", url="https://oceanproxy.io/datacenter#info")],
         [
             InlineKeyboardButton("🔙 Back to proxies menu", callback_data="buy_proxy"),
         ]
@@ -175,19 +178,18 @@ async def buy_datacenter(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
-async def buy_isp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def isp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = update.effective_user
     buy_text = (
-        f"We have plenty to choose from\n"
-        "Please join our news channel @OceanProxyIO\n"
-        "By using our bot, you agree that you know what you are buying and agree to the [terms of use](https://example.com).\n"
-        "and with the section Rules and FAQ\n"
+        f"Our ISP proxies are designed for high performance and reliability.\n"
+        "Please press the 'pricing' button to see our pricing.\n"
+        "Please press the 'info' button to see more information about our ISP proxies.\n"
     )
     
     keyboard = [
-        [InlineKeyboardButton("🌊 Pricing", callback_data="resi_pricing"),
-         InlineKeyboardButton("👤 Info", callback_data="resi_info")],
+        [InlineKeyboardButton("🌊 Pricing", url="https://oceanproxy.io/isp#pricing"),
+         InlineKeyboardButton("👤 Info", url="https://oceanproxy.io/isp#info")],
         [
             InlineKeyboardButton("🔙 Back to proxies menu", callback_data="buy_proxy"),
         ]
@@ -350,6 +352,35 @@ async def website(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
+async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    website_text = (
+        "We ran into a little issue with your request :C\n"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🔙 Back to main menu", callback_data="start")]
+    ]
+    
+    # Edit both the image and caption
+    try:
+        with open("./web.png", "rb") as photo_file:
+            await query.edit_message_media(
+                media=InputMediaPhoto(
+                    media=photo_file,
+                    caption=website_text,
+                    parse_mode='Markdown'
+                ),
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+    except FileNotFoundError:
+        # If web.png doesn't exist, just edit the caption
+        await query.edit_message_caption(
+            caption=website_text,
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
 async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = update.effective_user
@@ -366,18 +397,15 @@ async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "rules":
         await rules(update, context)
     # individual proxy menus
-    elif query.data == "buy_resi":
-        await buy_resi(update, context)
-    elif query.data == "buy_datacenter":
-        await buy_datacenter(update, context)
-    elif query.data == "buy_isp":
-        await buy_isp(update, context)
+    elif query.data == "residential":
+        await residential(update, context)
+    elif query.data == "datacenter":
+        await datacenter(update, context)
+    elif query.data == "isp":
+        await isp(update, context)
     else:
         # Edit the existing message instead of sending a new one
-        await query.edit_message_caption(
-            caption="Ran into a little issue with your request :C",
-            parse_mode='Markdown'
-        )
+        await error(update, context)
 
 def main():
     init_db()
