@@ -37,6 +37,7 @@ func main() {
 		r.Use(handlers.AuthMiddleware)
 		r.Post("/plan", handlers.CreatePlanHandler)                // proxies.fo
 		r.Post("/nettify/plan", handlers.CreateNettifyPlanHandler) // nettify
+		r.Get("/ports", handlers.PortsInUseHandler)
 		r.Get("/proxies", handlers.GetProxiesHandler)
 		r.Post("/restore", handlers.RestoreHandler)
 	})

@@ -4,7 +4,13 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
+	"strconv"
 )
+
+func KillPort(port int) error {
+	cmd := exec.Command("bash", "-c", "lsof -ti tcp:"+strconv.Itoa(port)+" | xargs -r kill -9")
+	return cmd.Run()
+}
 
 func Spawn3proxy(e Entry) error {
 	cmd := exec.Command("bash", "/root/oceanproxy-api/backend/scripts/create_proxy_plan.sh",

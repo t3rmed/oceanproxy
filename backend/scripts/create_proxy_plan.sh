@@ -23,7 +23,11 @@ fi
 # === Build the parent line depending on upstream ===
 case "$UPSTREAM_HOST" in
   dcp.proxies.fo|pr-us.proxies.fo|pr-eu.proxies.fo)
-    # All use the same correct parent line order
+    # ProxiesFO hosts
+    PARENT_LINE="parent 1000 http $UPSTREAM_HOST $UPSTREAM_PORT $USERNAME $PASSWORD"
+    ;;
+  alpha.oceanproxy.io|beta.oceanproxy.io|mobile.oceanproxy.io|unlim.oceanproxy.io)
+    # Nettify hosts  
     PARENT_LINE="parent 1000 http $UPSTREAM_HOST $UPSTREAM_PORT $USERNAME $PASSWORD"
     ;;
   *)
@@ -45,6 +49,4 @@ EOF
 
 # === Launch 3proxy with the new config ===
 echo "🚀 Starting 3proxy on port $LOCAL_PORT for plan $PLAN_ID"
-nohup /usr/bin/3proxy "$CONFIG_FILE" >/dev/null 2>&1 &
-
-echo "✅ 3proxy started successfully"
+nohup /usr

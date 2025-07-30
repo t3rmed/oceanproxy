@@ -3,12 +3,24 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"time"
 
 	"oceanproxy-api/proxy"
 )
+
+// portInUse checks if a local TCP port is already bound
+func portInUse(port int) bool {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	conn, err := net.DialTimeout("tcp", addr, 1*time.Second)
+	if err != nil {
+		return false // not in use
+	}
+	_ = conn.Close()
+	return true // already bound
+}
 
 func RestoreHandler(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(proxy.LogPath)
@@ -36,9 +48,19 @@ func RestoreHandler(w http.ResponseWriter, r *http.Request) {
 
 	for _, e := range entries {
 		if e.ExpiresAt < time.Now().Unix() {
-			continue
+			continue // skip expired proxies
 		}
 
+		// If the port is in use, assume it's stale and force kill it
+		if portInUse(e.LocalPort) {
+			if err := proxy.KillPort(e.LocalPort); err != nil {
+				failed = append(failed, e.PlanID+"-"+e.Subdomain+" (kill failed)")
+				continue
+			}
+			time.Sleep(1 * time.Second) // brief pause after killing
+		}
+
+		// Attempt to start 3proxy for this entry
 		err := proxy.Spawn3proxy(e)
 		if err != nil {
 			failed = append(failed, e.PlanID+"-"+e.Subdomain)
@@ -46,11 +68,13 @@ func RestoreHandler(w http.ResponseWriter, r *http.Request) {
 			restored = append(restored, e.PlanID+"-"+e.Subdomain)
 		}
 
-		// Add missing region (eu/usa) logic
+		// Check and restore missing counterpart region (EU/USA)
 		if e.Subdomain == "eu" && !existing[e.PlanID]["usa"] {
 			usaEntry := proxy.NewEntry(e.PlanID, e.Username, e.Password, "pr-us.proxies.fo", 1337, "usa", e.AuthPort, e.ExpiresAt)
-			err := proxy.Spawn3proxy(usaEntry)
-			if err == nil {
+			if portInUse(usaEntry.LocalPort) {
+				_ = proxy.KillPort(usaEntry.LocalPort)
+			}
+			if err := proxy.Spawn3proxy(usaEntry); err == nil {
 				newEntries = append(newEntries, usaEntry)
 				restored = append(restored, e.PlanID+"-usa")
 			} else {
@@ -60,8 +84,10 @@ func RestoreHandler(w http.ResponseWriter, r *http.Request) {
 
 		if e.Subdomain == "usa" && !existing[e.PlanID]["eu"] {
 			euEntry := proxy.NewEntry(e.PlanID, e.Username, e.Password, "pr-eu.proxies.fo", 1338, "eu", e.AuthPort, e.ExpiresAt)
-			err := proxy.Spawn3proxy(euEntry)
-			if err == nil {
+			if portInUse(euEntry.LocalPort) {
+				_ = proxy.KillPort(euEntry.LocalPort)
+			}
+			if err := proxy.Spawn3proxy(euEntry); err == nil {
 				newEntries = append(newEntries, euEntry)
 				restored = append(restored, e.PlanID+"-eu")
 			} else {

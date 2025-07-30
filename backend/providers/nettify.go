@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"oceanproxy-api/config"
 	"oceanproxy-api/proxy"
@@ -31,8 +33,10 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 
 	username := form.Get("username")
 	if username == "" {
-		return nil, errors.New("username is required")
+		username = "user"
 	}
+	// Always append timestamp to ensure uniqueness
+	username = fmt.Sprintf("%s_%d", username, time.Now().Unix())
 
 	password := form.Get("password")
 	if password == "" {
@@ -71,6 +75,13 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 	}
 
 	jsonData, _ := json.Marshal(requestData)
+
+	// Debug: Print what we're sending to Nettify API
+	fmt.Printf("DEBUG: Sending to Nettify API:\n")
+	fmt.Printf("DEBUG: URL: %s\n", apiURL)
+	fmt.Printf("DEBUG: Headers: Authorization: Bearer %s\n", config.NettifyAPIKey)
+	fmt.Printf("DEBUG: Body: %s\n", string(jsonData))
+
 	req, _ := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 	req.Header.Set("Authorization", "Bearer "+config.NettifyAPIKey)
 	req.Header.Set("Content-Type", "application/json")
@@ -80,6 +91,16 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	// Debug: Print response
+	fmt.Printf("DEBUG: Response Status: %d\n", resp.StatusCode)
+
+	// Read response body for debugging
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	fmt.Printf("DEBUG: Response Body: %s\n", string(bodyBytes))
+
+	// Reset response body for JSON decoding
+	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	var result map[string]interface{}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -132,20 +153,21 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 
 	switch planType {
 	case "residential":
+		authPort := 8080 // Default auth port for residential
 		proxies = []proxy.Entry{
-			proxy.NewEntry(planID, user, pass, "alpha.oceanproxy.io", 9876, "global", 9876, expires),
+			proxy.NewEntry(planID, user, pass, "proxy.nettify.xyz", 9876, "alpha", authPort, expires),
 		}
 	case "datacenter":
 		proxies = []proxy.Entry{
-			proxy.NewEntry(planID, user, pass, "beta.oceanproxy.io", 8765, "global", 8765, expires),
+			proxy.NewEntry(planID, user, pass, "proxy.nettify.xyz", 8080, "beta", 8765, expires),
 		}
 	case "mobile":
 		proxies = []proxy.Entry{
-			proxy.NewEntry(planID, user, pass, "mobile.oceanproxy.io", 7654, "global", 7654, expires),
+			proxy.NewEntry(planID, user, pass, "proxy.nettify.xyz", 8080, "mobile", 7654, expires),
 		}
 	case "unlimited":
 		proxies = []proxy.Entry{
-			proxy.NewEntry(planID, user, pass, "unlim.oceanproxy.io", 6543, "global", 6543, expires),
+			proxy.NewEntry(planID, user, pass, "proxy.nettify.xyz", 8080, "unlim", 6543, expires),
 		}
 	}
 
