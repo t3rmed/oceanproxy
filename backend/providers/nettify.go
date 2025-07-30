@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -71,7 +72,7 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 
 	jsonData, _ := json.Marshal(requestData)
 	req, _ := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
-	req.Header.Set("Authorization", "Bearer "+config.APIKey)
+	req.Header.Set("Authorization", "Bearer "+config.NettifyAPIKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -85,13 +86,29 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 		return nil, err
 	}
 
-	user := result["username"].(string)
-	planID := result["plan_id"].(string)
+	// Check for API errors first
+	if resp.StatusCode != 200 {
+		if message, exists := result["message"]; exists {
+			return nil, fmt.Errorf("API error (%d): %v", resp.StatusCode, message)
+		}
+		return nil, fmt.Errorf("API error: status code %d", resp.StatusCode)
+	}
+
+	// Extract fields safely
+	user, ok := result["username"].(string)
+	if !ok {
+		return nil, fmt.Errorf("username field missing or invalid in response")
+	}
+
+	planID, ok := result["plan_id"].(string)
+	if !ok {
+		return nil, fmt.Errorf("plan_id field missing or invalid in response")
+	}
 
 	// Get plan details to get password
 	detailsURL := "https://api.nettify.xyz/plans/" + planID
 	detailsReq, _ := http.NewRequest("GET", detailsURL, nil)
-	detailsReq.Header.Set("Authorization", "Bearer "+config.APIKey)
+	detailsReq.Header.Set("Authorization", "Bearer "+config.NettifyAPIKey)
 
 	detailsResp, err := http.DefaultClient.Do(detailsReq)
 	if err != nil {
@@ -104,7 +121,11 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 		return nil, err
 	}
 
-	pass := details["password"].(string)
+	pass, ok := details["password"].(string)
+	if !ok {
+		return nil, fmt.Errorf("password field missing or invalid in plan details response")
+	}
+
 	expires := int64(0) // No expiration for bandwidth-based plans
 
 	var proxies []proxy.Entry

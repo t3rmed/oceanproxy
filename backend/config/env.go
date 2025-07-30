@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	APIKey      string
-	BearerToken string
-	BaseDomain  string
+	APIKey        string
+	BearerToken   string
+	BaseDomain    string
+	NettifyAPIKey string
 )
 
 func LoadEnv() {
@@ -21,9 +22,14 @@ func LoadEnv() {
 	APIKey = os.Getenv("API_KEY")
 	BearerToken = os.Getenv("BEARER_TOKEN")
 	BaseDomain = os.Getenv("DOMAIN")
+	NettifyAPIKey = os.Getenv("NETTIFY_API_KEY")
 
 	if APIKey == "" || BearerToken == "" || BaseDomain == "" {
 		log.Fatal("❌ Missing API_KEY, BEARER_TOKEN or DOMAIN in .env")
+	}
+
+	if NettifyAPIKey == "" {
+		log.Println("⚠️ NETTIFY_API_KEY not found in .env - Nettify provider will not work")
 	}
 }
 
