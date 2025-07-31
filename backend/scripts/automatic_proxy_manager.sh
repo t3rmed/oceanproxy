@@ -13,6 +13,7 @@ PORT_RANGES["proxy.nettify.xyz_alpha"]="30000"  # Alpha: 30000-39999
 PORT_RANGES["proxy.nettify.xyz_beta"]="40000"   # Beta: 40000-49999
 PORT_RANGES["proxy.nettify.xyz_mobile"]="50000" # Mobile: 50000-59999
 PORT_RANGES["proxy.nettify.xyz_unlim"]="60000"  # Unlimited: 60000-69999
+PORT_RANGES["dcp.proxies.fo_datacenter"]="40000" # Datacenter: 40000-49999
 
 # Public ports (what clients connect to)
 declare -A PUBLIC_PORTS
@@ -22,6 +23,7 @@ PUBLIC_PORTS["proxy.nettify.xyz_alpha"]="9876"
 PUBLIC_PORTS["proxy.nettify.xyz_beta"]="8765"
 PUBLIC_PORTS["proxy.nettify.xyz_mobile"]="7654"
 PUBLIC_PORTS["proxy.nettify.xyz_unlim"]="6543"
+PUBLIC_PORTS["dcp.proxies.fo_datacenter"]="1339"
 
 # Subdomains for each plan type
 declare -A SUBDOMAINS
@@ -31,6 +33,7 @@ SUBDOMAINS["proxy.nettify.xyz_alpha"]="alpha"
 SUBDOMAINS["proxy.nettify.xyz_beta"]="beta"
 SUBDOMAINS["proxy.nettify.xyz_mobile"]="mobile"
 SUBDOMAINS["proxy.nettify.xyz_unlim"]="unlim"
+SUBDOMAINS["dcp.proxies.fo_datacenter"]="datacenter"
 
 echo "🚀 HTTP Proxy Whitelabel Manager - Rebuilding entire system..."
 

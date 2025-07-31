@@ -119,8 +119,41 @@ test_proxy() {
         proxy_endpoint="127.0.0.1:$local_port"
         endpoint_name="local:$local_port"
     else
-        proxy_endpoint="${subdomain}.oceanproxy.io:$public_port"
-        endpoint_name="public:$public_port"
+        # Use actual subdomain endpoints
+        case "$subdomain" in
+            "usa")
+                proxy_endpoint="usa.oceanproxy.io:1337"
+                endpoint_name="usa:1337"
+                ;;
+            "eu")
+                proxy_endpoint="eu.oceanproxy.io:1338"
+                endpoint_name="eu:1338"
+                ;;
+            "alpha")
+                proxy_endpoint="alpha.oceanproxy.io:9876"
+                endpoint_name="alpha:9876"
+                ;;
+            "beta")
+                proxy_endpoint="beta.oceanproxy.io:8765"
+                endpoint_name="beta:8765"
+                ;;
+            "mobile")
+                proxy_endpoint="mobile.oceanproxy.io:7654"
+                endpoint_name="mobile:7654"
+                ;;
+            "unlim")
+                proxy_endpoint="unlim.oceanproxy.io:6543"
+                endpoint_name="unlim:6543"
+                ;;
+            "datacenter")
+                proxy_endpoint="datacenter.oceanproxy.io:1339"
+                endpoint_name="datacenter:1339"
+                ;;
+            *)
+                proxy_endpoint="${subdomain}.oceanproxy.io:8080"
+                endpoint_name="${subdomain}:8080"
+                ;;
+        esac
     fi
     
     printf "${BLUE}🧪 [$test_num] Testing $plan_id ($username) via $endpoint_name...${NC}\n"
@@ -263,10 +296,21 @@ while IFS= read -r entry && [ $count -lt 3 ]; do
     password=$(echo "$entry" | jq -r '.password')
     subdomain=$(echo "$entry" | jq -r '.subdomain')
     local_port=$(echo "$entry" | jq -r '.local_port')
-    public_port=$(echo "$entry" | jq -r '.public_port')
+    
+    # Determine public endpoint
+    case "$subdomain" in
+        "usa") public_endpoint="usa.oceanproxy.io:1337" ;;
+        "eu") public_endpoint="eu.oceanproxy.io:1338" ;;
+        "alpha") public_endpoint="alpha.oceanproxy.io:9876" ;;
+        "beta") public_endpoint="beta.oceanproxy.io:8765" ;;
+        "mobile") public_endpoint="mobile.oceanproxy.io:7654" ;;
+        "unlim") public_endpoint="unlim.oceanproxy.io:6543" ;;
+        "datacenter") public_endpoint="datacenter.oceanproxy.io:1339" ;;
+        *) public_endpoint="${subdomain}.oceanproxy.io:8080" ;;
+    esac
     
     echo "Plan $plan_id ($username):"
-    echo "  Public:  curl -x ${subdomain}.oceanproxy.io:$public_port -U $username:$password $TEST_URL"
+    echo "  Public:  curl -x $public_endpoint -U $username:$password $TEST_URL"
     echo "  Local:   curl -x 127.0.0.1:$local_port -U $username:$password $TEST_URL"
     echo ""
     
