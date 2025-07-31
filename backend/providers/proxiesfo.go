@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,13 +65,56 @@ func CreateProxiesFOPlan(form url.Values) (*ProxyPlanInfo, error) {
 		return nil, err
 	}
 
-	data := result["Data"].(map[string]interface{})
+	// DEBUG: Print the actual response
+	fmt.Printf("DEBUG: Proxies.fo API Response: %+v\n", result)
 
-	user := data["AuthUsername"].(string)
-	pass := data["AuthPassword"].(string)
-	planID := data["ID"].(string)
-	authPort := int(data["AuthPort"].(float64))
-	expires := int64(data["EndsDate"].(float64))
+	// Check if the API request was successful
+	success, ok := result["Success"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: missing 'Success' field")
+	}
+
+	if !success {
+		// Handle error response
+		errorMsg, ok := result["Error"].(string)
+		if !ok {
+			errorMsg = "Unknown error from Proxies.fo API"
+		}
+		return nil, fmt.Errorf("Proxies.fo API error: %s", errorMsg)
+	}
+
+	// Now safely handle the success case
+	data, ok := result["Data"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("unexpected response format: 'Data' field missing or wrong type")
+	}
+
+	user, ok := data["AuthUsername"].(string)
+	if !ok {
+		return nil, fmt.Errorf("AuthUsername field missing or wrong type")
+	}
+
+	pass, ok := data["AuthPassword"].(string)
+	if !ok {
+		return nil, fmt.Errorf("AuthPassword field missing or wrong type")
+	}
+
+	planID, ok := data["ID"].(string)
+	if !ok {
+		return nil, fmt.Errorf("ID field missing or wrong type")
+	}
+
+	authPortFloat, ok := data["AuthPort"].(float64)
+	if !ok {
+		return nil, fmt.Errorf("AuthPort field missing or wrong type")
+	}
+	authPort := int(authPortFloat)
+
+	expiresFloat, ok := data["EndsDate"].(float64)
+	if !ok {
+		return nil, fmt.Errorf("EndsDate field missing or wrong type")
+	}
+	expires := int64(expiresFloat)
 
 	proxies := []proxy.Entry{
 		proxy.NewEntry(planID, user, pass, "pr-eu.proxies.fo", 1338, "eu", authPort, expires),
