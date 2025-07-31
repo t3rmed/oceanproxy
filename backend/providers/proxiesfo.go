@@ -116,9 +116,26 @@ func CreateProxiesFOPlan(form url.Values) (*ProxyPlanInfo, error) {
 	}
 	expires := int64(expiresFloat)
 
-	proxies := []proxy.Entry{
-		proxy.NewEntry(planID, user, pass, "pr-eu.proxies.fo", 1338, "eu", authPort, expires),
-		proxy.NewEntry(planID, user, pass, "pr-us.proxies.fo", 1337, "usa", authPort, expires),
+	// Get the correct hostname from the response
+	authHostname, ok := data["AuthHostname"].(string)
+	if !ok {
+		authHostname = "pr-us.proxies.fo" // fallback to default
+	}
+
+	// Create proxies based on the actual hostname returned
+	var proxies []proxy.Entry
+
+	if authHostname == "dcp.proxies.fo" {
+		// Datacenter proxy - single endpoint
+		proxies = []proxy.Entry{
+			proxy.NewEntry(planID, user, pass, authHostname, 1339, "datacenter", authPort, expires),
+		}
+	} else {
+		// Residential/ISP - create both EU and USA
+		proxies = []proxy.Entry{
+			proxy.NewEntry(planID, user, pass, "pr-eu.proxies.fo", 1338, "eu", authPort, expires),
+			proxy.NewEntry(planID, user, pass, "pr-us.proxies.fo", 1337, "usa", authPort, expires),
+		}
 	}
 
 	return &ProxyPlanInfo{

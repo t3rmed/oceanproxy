@@ -37,6 +37,7 @@ PUBLIC_PORTS["alpha"]="9876"
 PUBLIC_PORTS["beta"]="8765"
 PUBLIC_PORTS["mobile"]="7654"
 PUBLIC_PORTS["unlim"]="6543"
+PUBLIC_PORTS["datacenter"]="1339"
 
 # Plan type mapping for upstream names
 declare -A PLAN_TYPES
@@ -46,6 +47,7 @@ PLAN_TYPES["alpha"]="proxy.nettify.xyz_alpha"
 PLAN_TYPES["beta"]="proxy.nettify.xyz_beta"
 PLAN_TYPES["mobile"]="proxy.nettify.xyz_mobile"
 PLAN_TYPES["unlim"]="proxy.nettify.xyz_unlim"
+PLAN_TYPES["datacenter"]="dcp.proxies.fo_datacenter"
 
 PUBLIC_PORT=${PUBLIC_PORTS[$SUBDOMAIN]}
 PLAN_TYPE=${PLAN_TYPES[$SUBDOMAIN]}

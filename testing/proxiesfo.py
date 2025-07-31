@@ -9,7 +9,7 @@ def create_plan():
         "X-Api-Auth": f"{API_KEY}",
         "Content-Type": "application/x-www-form-urlencoded"
     }
-    payload = "reseller=7c9ea873-63f9-4013-9147-3807cc6f0553&bandwidth=1&duration=180"
+    payload = "reseller=b3fd0f3c-693d-4ec5-b49f-c77feaab0b72&duration=1&threads=500"
     response = requests.post(url, headers=headers, data=payload)
     print(url)
     print(headers)

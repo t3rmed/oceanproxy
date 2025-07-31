@@ -13,6 +13,16 @@ def create_residential_plan():
     response = requests.post(url, headers=headers, data=payload)
     return response.text
 
+def create_datacenter_plan():
+    url = f"{BASE_URL}/plan"
+    headers = {
+        "Authorization": BEARER_TOKEN,
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+    payload = "reseller=datacenter&duration=1&threads=500"
+    response = requests.post(url, headers=headers, data=payload)
+    return response.text
+
 def get_proxies():
     url = f"{BASE_URL}/proxies"
     headers = {
@@ -31,6 +41,6 @@ def restore_proxies():
     response = requests.post(url, headers=headers)
     return response.text
 
-# print(create_residential_plan())
-print(restore_proxies())
+# print(create_datacenter_plan())
+# print(restore_proxies())
 print(get_proxies())

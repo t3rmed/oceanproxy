@@ -32,6 +32,7 @@ func Spawn3proxy(e Entry) error {
 		e.Password,
 		e.AuthHost,
 		fmt.Sprintf("%d", e.AuthPort),
+		e.Subdomain,
 	)
 
 	out, err := cmd.CombinedOutput()
