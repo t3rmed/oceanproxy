@@ -941,7 +941,8 @@ EOF
     
     log "Monitoring and logging setup complete"
 }
-    log "Testing installation..."
+
+test_installation() {
     
     # Test API health
     log "Testing API health endpoint..."
