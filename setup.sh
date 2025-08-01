@@ -941,6 +941,7 @@ EOF
 }
 
 test_installation() {
+    log "Testing installation..."
     
     # Test API health
     log "Testing API health endpoint..."
@@ -1022,12 +1023,12 @@ print_summary() {
     echo
     echo -e "${GREEN}🔐 SSL Status:${NC}"
     if [[ -d /etc/letsencrypt/live ]]; then
-        echo "  • SSL certificates: ✅ Configured and active"
+        echo "  • SSL certificates: ✅ Configured and active for api.$DOMAIN"
         echo "  • Auto-renewal: ✅ Enabled via certbot.timer"
         echo "  • HTTPS endpoints: https://api.$DOMAIN/health"
     else
         echo "  • SSL certificates: ⚠️  Not configured yet"
-        echo "  • Run: sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN"
+        echo "  • Run: sudo certbot --nginx -d api.$DOMAIN"
     fi
     echo
     echo -e "${GREEN}📈 Next Steps:${NC}"
@@ -1049,7 +1050,7 @@ print_summary() {
     echo "  • Firewall configured - ensure DNS points to: $(curl -s ifconfig.me || echo 'unknown')"
     echo
     echo -e "${GREEN}🔧 SSL Setup Commands (if needed):${NC}"
-    echo "  • Manual SSL setup: sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN"
+    echo "  • Manual SSL setup: sudo certbot --nginx -d api.$DOMAIN"
     echo "  • Check certificates: sudo certbot certificates"
     echo "  • Test renewal: sudo certbot renew --dry-run"
     echo "  • View SSL logs: sudo tail -f /var/log/letsencrypt/letsencrypt.log"
