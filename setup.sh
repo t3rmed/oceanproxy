@@ -1140,9 +1140,6 @@ main() {
         setup_ssl
     fi
     
-    # Testing
-    test_installation
-    
     # Summary
     print_summary
     
