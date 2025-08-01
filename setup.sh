@@ -387,39 +387,31 @@ build_application() {
         error "Backend structure not found. Please check your repository structure."
     fi
     
+    # Get the installed Go version (major.minor format)
+    INSTALLED_GO_VERSION=$(go version | grep -o 'go[0-9]\+\.[0-9]\+' | sed 's/go//')
+    log "Installed Go version: $INSTALLED_GO_VERSION"
+    
     # Fix go.mod version format if needed
     if [[ -f "go.mod" ]]; then
-        # Check current Go version
-        INSTALLED_GO_VERSION=$(go version | grep -o 'go[0-9]\+\.[0-9]\+' | sed 's/go//')
-        log "Using Go version: $INSTALLED_GO_VERSION"
+        log "Current go.mod content before fix:"
+        cat go.mod
         
-        # Check and fix invalid go version format in go.mod
-        if grep -q "go 1\.[0-9]\+\.[0-9]\+" go.mod; then
-            log "Fixing go.mod version format..."
-            sudo -u "$SERVICE_USER" sed -i "s/go 1\.[0-9]\+\.[0-9]\+/go $INSTALLED_GO_VERSION/" go.mod
-            log "Updated go.mod to use version: $INSTALLED_GO_VERSION"
-        elif grep -q "go 1\.[0-9]\+" go.mod; then
-            # Check if version in go.mod is higher than installed version
-            GOMOD_VERSION=$(grep "go 1\.[0-9]\+" go.mod | awk '{print $2}' | sed 's/1\.//')
-            INSTALLED_MINOR=$(echo $INSTALLED_GO_VERSION | sed 's/1\.//')
-            
-            if [[ $GOMOD_VERSION -gt $INSTALLED_MINOR ]]; then
-                log "Updating go.mod to match installed Go version..."
-                sudo -u "$SERVICE_USER" sed -i "s/go 1\.[0-9]\+/go $INSTALLED_GO_VERSION/" go.mod
-                log "Updated go.mod to use version: $INSTALLED_GO_VERSION"
-            fi
+        # Fix invalid version formats like "1.24.4" or versions higher than what we have
+        if grep -q "go 1\." go.mod; then
+            log "Updating go.mod to use installed Go version: $INSTALLED_GO_VERSION"
+            sudo -u "$SERVICE_USER" sed -i "s/go 1\.[0-9]\+\(\.[0-9]\+\)\?/go $INSTALLED_GO_VERSION/" go.mod
+            log "Updated go.mod successfully"
         fi
     else
         # Create go.mod if it doesn't exist
         log "Creating go.mod file..."
-        INSTALLED_GO_VERSION=$(go version | grep -o 'go[0-9]\+\.[0-9]\+' | sed 's/go//')
         sudo -u "$SERVICE_USER" go mod init oceanproxy
         sudo -u "$SERVICE_USER" sed -i "s/go .*/go $INSTALLED_GO_VERSION/" go.mod
         log "Created go.mod with Go version: $INSTALLED_GO_VERSION"
     fi
     
-    # Show go.mod content for debugging
-    log "Current go.mod content:"
+    # Show go.mod content after fix
+    log "go.mod content after fix:"
     cat go.mod
     
     # Initialize Go modules with PATH set
