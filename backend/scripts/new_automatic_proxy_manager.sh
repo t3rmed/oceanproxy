@@ -5,7 +5,7 @@
 PROXY_LOG="/var/log/oceanproxy/proxies.json"
 CONFIG_DIR="/etc/3proxy/plans"
 
-# Port ranges for each plan type (internal ports)
+# Port ranges for each plan type (internal ports)        
 declare -A PORT_RANGES
 PORT_RANGES["pr-us.proxies.fo_usa"]="10000"
 PORT_RANGES["pr-eu.proxies.fo_eu"]="20000"
@@ -117,7 +117,7 @@ for plan_type in "${!PLAN_GROUPS[@]}"; do
         USED_PORTS[$current_port]=1
 
         echo "   🔄 Plan $plan_id ($username) → Internal port $current_port"
-        echo "      Client connects: ${subdomain}.oceanproxy.io:${public_port}:${username}:${password}"
+        echo "      Client connects: ${subdomain}.oceanproxy.io:${public_port}:${username}:${password}"     
         echo "      Routes through: 127.0.0.1:$current_port → $auth_host:$auth_port"
 
         config_file="${CONFIG_DIR}/${plan_id}_${plan_subdomain}.cfg"
@@ -143,7 +143,7 @@ proxy -n -a -p$current_port -i0.0.0.0 -e0.0.0.0
 EOF
 
         echo "      🚀 Starting 3proxy for user $username on port $current_port"
-        nohup /usr/bin/3proxy "$config_file" > "/var/log/3proxy_${plan_id}_${plan_subdomain}.log" 2>&1 &
+        nohup /usr/bin/3proxy "$config_file" > "/var/log/3proxy_${plan_id}_${plan_subdomain}.log" 2>&1 &    
 
         PLAN_SERVERS[$plan_type]+=$'\n'"    server 127.0.0.1:$current_port;"
 
@@ -240,4 +240,3 @@ for plan_type in "${!PLAN_GROUPS[@]}"; do
 done
 echo ""
 echo "📋 Flow: Client → nginx → 3proxy → Upstream Provider"
-

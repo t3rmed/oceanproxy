@@ -1,0 +1,138 @@
+#!/bin/bash
+
+# Script to clean up invalid proxy plans (bad upstream hosts, expired plans, etc.)
+
+PROXY_LOG="/var/log/oceanproxy/proxies.json"
+BACKUP_LOG="/var/log/oceanproxy/proxies_backup_$(date +%Y%m%d_%H%M%S).json"
+CONFIG_DIR="/etc/3proxy/plans"
+
+echo "🧹 Starting cleanup of invalid proxy plans..."
+
+# Check if proxy log exists
+if [ ! -f "$PROXY_LOG" ]; then
+    echo "❌ Proxy log file not found: $PROXY_LOG"
+    exit 1
+fi
+
+# Create backup
+echo "💾 Creating backup: $BACKUP_LOG"
+cp "$PROXY_LOG" "$BACKUP_LOG"
+
+# Install jq if not present
+if ! command -v jq &> /dev/null; then
+    echo "📦 Installing jq..."
+    apt-get update && apt-get install -y jq
+fi
+
+# Define valid upstream hosts
+VALID_HOSTS=("dcp.proxies.fo" "pr-us.proxies.fo" "pr-eu.proxies.fo" "proxy.nettify.xyz")
+
+echo "🔍 Analyzing proxy plans..."
+
+# Get current timestamp
+CURRENT_TIME=$(date +%s)
+
+# Process entries and identify invalid ones
+INVALID_COUNT=0
+EXPIRED_COUNT=0
+KILLED_PROCESSES=0
+
+echo "📋 Processing entries:"
+
+# Create temporary file for valid entries
+TEMP_LOG=$(mktemp)
+
+jq -c '.[]' "$PROXY_LOG" | while read -r entry; do
+    plan_id=$(echo "$entry" | jq -r '.plan_id')
+    username=$(echo "$entry" | jq -r '.username')
+    auth_host=$(echo "$entry" | jq -r '.auth_host')
+    local_port=$(echo "$entry" | jq -r '.local_port')
+    expires_at=$(echo "$entry" | jq -r '.expires_at')
+    subdomain=$(echo "$entry" | jq -r '.subdomain')
+    
+    SHOULD_REMOVE=false
+    REASON=""
+    
+    # Check if upstream host is valid
+    HOST_VALID=false
+    for valid_host in "${VALID_HOSTS[@]}"; do
+        if [[ "$auth_host" == "$valid_host" ]]; then
+            HOST_VALID=true
+            break
+        fi
+    done
+    
+    if [ "$HOST_VALID" = false ]; then
+        SHOULD_REMOVE=true
+        REASON="Invalid upstream host: $auth_host"
+        ((INVALID_COUNT++))
+    fi
+    
+    # Check if plan is expired (if expires_at > 0)
+    if [ "$expires_at" != "null" ] && [ "$expires_at" != "0" ] && [ "$expires_at" -lt "$CURRENT_TIME" ]; then
+        SHOULD_REMOVE=true
+        REASON="Expired plan (expired: $(date -d @$expires_at))"
+        ((EXPIRED_COUNT++))
+    fi
+    
+    # Check for malformed entries
+    if [ "$plan_id" = "null" ] || [ "$username" = "null" ] || [ "$auth_host" = "null" ]; then
+        SHOULD_REMOVE=true
+        REASON="Malformed entry (missing required fields)"
+        ((INVALID_COUNT++))
+    fi
+    
+    if [ "$SHOULD_REMOVE" = true ]; then
+        echo "🗑️  REMOVING: $plan_id [$subdomain] - $REASON"
+        
+        # Kill any process using this port
+        if [ "$local_port" != "null" ]; then
+            EXISTING_PID=$(lsof -tiTCP:$local_port 2>/dev/null)
+            if [ -n "$EXISTING_PID" ]; then
+                echo "   🛑 Killing process on port $local_port (PID: $EXISTING_PID)"
+                kill -9 "$EXISTING_PID" 2>/dev/null
+                ((KILLED_PROCESSES++))
+            fi
+        fi
+        
+        # Remove config files
+        OLD_CONFIG="${CONFIG_DIR}/${plan_id}.cfg"
+        NEW_CONFIG="${CONFIG_DIR}/${plan_id}_${subdomain}.cfg"
+        
+        [ -f "$OLD_CONFIG" ] && rm -f "$OLD_CONFIG" && echo "   🗑️  Removed: $OLD_CONFIG"
+        [ -f "$NEW_CONFIG" ] && rm -f "$NEW_CONFIG" && echo "   🗑️  Removed: $NEW_CONFIG"
+        
+    else
+        echo "✅ KEEPING: $plan_id [$subdomain] - Valid"
+        echo "$entry" >> "$TEMP_LOG"
+    fi
+done
+
+# Create new JSON array from valid entries
+echo "📝 Creating cleaned proxy log..."
+if [ -s "$TEMP_LOG" ]; then
+    # Convert newline-separated JSON objects back to array
+    jq -s '.' "$TEMP_LOG" > "$PROXY_LOG"
+else
+    # No valid entries, create empty array
+    echo "[]" > "$PROXY_LOG"
+fi
+
+# Clean up temp file
+rm -f "$TEMP_LOG"
+
+echo ""
+echo "🎉 Cleanup completed!"
+echo ""
+echo "📊 Summary:"
+echo "   Invalid upstream hosts removed: $INVALID_COUNT"
+echo "   Expired plans removed: $EXPIRED_COUNT"
+echo "   Processes killed: $KILLED_PROCESSES"
+echo "   Backup saved to: $BACKUP_LOG"
+echo ""
+echo "📋 Current status:"
+REMAINING_COUNT=$(jq length "$PROXY_LOG")
+echo "   Remaining valid plans: $REMAINING_COUNT"
+echo "   Active 3proxy processes: $(ps aux | grep 3proxy | grep -v grep | wc -l)"
+echo ""
+echo "✅ Cleanup finished successfully!"

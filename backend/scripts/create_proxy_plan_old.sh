@@ -81,7 +81,7 @@ case "$UPSTREAM_HOST" in
         ;;
     *)
         echo "⚠️ Unknown upstream host: $UPSTREAM_HOST"
-        echo "   Supported hosts: dcp.proxies.fo, pr-us.proxies.fo, pr-eu.proxies.fo, proxy.nettify.xyz"    
+        echo "   Supported hosts: dcp.proxies.fo, pr-us.proxies.fo, pr-eu.proxies.fo, proxy.nettify.xyz"
         exit 1
         ;;
 esac
@@ -196,9 +196,9 @@ upstream ${PLAN_TYPE}_pool {
 server {
     listen ${PUBLIC_PORT};
     proxy_pass ${PLAN_TYPE}_pool;
-    proxy_timeout 15s;
+    proxy_timeout 10s;
     proxy_responses 1;
-    proxy_connect_timeout 10s;
+    proxy_connect_timeout 5s;
     error_log /var/log/nginx/${SUBDOMAIN}_proxy_error.log;
 }
 EOF
@@ -222,7 +222,7 @@ echo "🧪 Testing nginx configuration..."
 if nginx -t > /dev/null 2>&1; then
     echo "✅ Nginx config valid - reloading..."
     systemctl reload nginx
-
+    
     # Verify nginx is listening on the public port
     sleep 1
     if netstat -tlnp | grep -q ":${PUBLIC_PORT} "; then
