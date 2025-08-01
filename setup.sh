@@ -768,43 +768,41 @@ setup_ssl() {
         return
     fi
     
-    log "Setting up SSL certificates..."
+    log "Setting up SSL certificates for API subdomain only..."
     
-    # Check if domain resolves to this server
+    # Check if API subdomain resolves to this server
     SERVER_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "unknown")
-    DOMAIN_IP=$(dig +short "$DOMAIN" | tail -n1)
     API_DOMAIN_IP=$(dig +short "api.$DOMAIN" | tail -n1)
     
     log "Server IP: $SERVER_IP"
-    log "Domain IP: $DOMAIN_IP"
     log "API Domain IP: $API_DOMAIN_IP"
     
-    if [[ "$SERVER_IP" != "$DOMAIN_IP" ]] && [[ "$SERVER_IP" != "$API_DOMAIN_IP" ]]; then
-        warn "Domain $DOMAIN does not resolve to this server ($SERVER_IP vs $DOMAIN_IP)"
+    if [[ "$SERVER_IP" != "$API_DOMAIN_IP" ]]; then
+        warn "API subdomain api.$DOMAIN does not resolve to this server ($SERVER_IP vs $API_DOMAIN_IP)"
         warn "SSL setup will be skipped. Configure DNS first, then run:"
-        warn "sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN"
+        warn "sudo certbot --nginx -d api.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN"
         return
     fi
     
     # Wait for nginx to be fully started
     sleep 5
     
-    # Test if challenge directory is accessible
+    # Test if challenge directory is accessible via API subdomain
     echo "test" > /var/www/html/.well-known/acme-challenge/test
-    TEST_RESPONSE=$(curl -s "http://$DOMAIN/.well-known/acme-challenge/test" || echo "failed")
+    TEST_RESPONSE=$(curl -s "http://api.$DOMAIN/.well-known/acme-challenge/test" || echo "failed")
     rm -f /var/www/html/.well-known/acme-challenge/test
     
     if [[ "$TEST_RESPONSE" != "test" ]]; then
-        warn "ACME challenge directory not accessible. SSL setup may fail."
+        warn "ACME challenge directory not accessible via api.$DOMAIN. SSL setup may fail."
         warn "Trying anyway..."
     else
-        log "ACME challenge directory accessible"
+        log "ACME challenge directory accessible via api.$DOMAIN"
     fi
     
-    # Obtain certificates for both main domain and API subdomain
-    log "Obtaining SSL certificate for $DOMAIN and api.$DOMAIN..."
-    if certbot --nginx -d "$DOMAIN" -d "api.$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN" --no-eff-email; then
-        log "SSL certificates obtained successfully"
+    # Obtain certificate for API subdomain only
+    log "Obtaining SSL certificate for api.$DOMAIN only..."
+    if certbot --nginx -d "api.$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN" --no-eff-email; then
+        log "SSL certificate obtained successfully for api.$DOMAIN"
         
         # Setup auto-renewal
         systemctl enable certbot.timer
@@ -815,8 +813,8 @@ setup_ssl() {
         
         log "SSL auto-renewal configured"
         
-        # Verify certificates
-        log "Verifying SSL certificates..."
+        # Verify certificate
+        log "Verifying SSL certificate..."
         if curl -s -f "https://api.$DOMAIN/health" > /dev/null; then
             log "✅ HTTPS API endpoint working"
         else
@@ -825,9 +823,9 @@ setup_ssl() {
         
     else
         warn "SSL certificate setup failed. You can set it up manually later with:"
-        warn "sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN"
+        warn "sudo certbot --nginx -d api.$DOMAIN"
         warn "Common issues:"
-        warn "  - DNS not pointing to this server"
+        warn "  - DNS for api.$DOMAIN not pointing to this server"
         warn "  - Firewall blocking port 80/443"
         warn "  - nginx not serving challenge files properly"
     fi
