@@ -463,8 +463,18 @@ EOF
 configure_nginx() {
     log "Configuring nginx..."
     
-    # Backup original configuration
-    cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
+    # Stop nginx first
+    systemctl stop nginx 2>/dev/null || true
+    
+    # Remove any existing oceanproxy configs completely
+    rm -f /etc/nginx/conf.d/oceanproxy*.conf
+    rm -f /etc/nginx/sites-available/oceanproxy
+    rm -f /etc/nginx/sites-enabled/oceanproxy
+    
+    # Backup original configuration if it exists and we haven't backed it up yet
+    if [[ -f /etc/nginx/nginx.conf && ! -f /etc/nginx/nginx.conf.backup ]]; then
+        cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup
+    fi
     
     # Check if nginx has stream module
     if ! nginx -V 2>&1 | grep -q "with-stream"; then
@@ -474,10 +484,8 @@ configure_nginx() {
         fi
     fi
     
-    # Remove any existing oceanproxy stream configs
-    rm -f /etc/nginx/conf.d/oceanproxy-stream.conf
-    
     # Create a complete nginx.conf with stream module
+    log "Creating complete nginx configuration with stream module..."
     cat > /etc/nginx/nginx.conf << 'EOF'
 user www-data;
 worker_processes auto;
@@ -618,7 +626,10 @@ EOF
     rm -f /etc/nginx/sites-enabled/default
     
     # Test configuration
+    log "Testing nginx configuration..."
     if ! nginx -t; then
+        log "nginx configuration test failed. Showing error details:"
+        nginx -t 2>&1 || true
         error "nginx configuration test failed"
     fi
     
