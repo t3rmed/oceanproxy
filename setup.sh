@@ -474,15 +474,43 @@ configure_nginx() {
         fi
     fi
     
-    # Add stream module to main nginx.conf if not present
-    if ! grep -q "stream {" /etc/nginx/nginx.conf; then
-        # Add include for stream configs
-        sed -i '/http {/i include /etc/nginx/conf.d/*-stream.conf;' /etc/nginx/nginx.conf
-    fi
+    # Remove any existing oceanproxy stream configs
+    rm -f /etc/nginx/conf.d/oceanproxy-stream.conf
     
-    # Create stream configuration
-    cat > /etc/nginx/conf.d/oceanproxy-stream.conf << 'EOF'
-# OceanProxy Stream Module Configuration
+    # Create a complete nginx.conf with stream module
+    cat > /etc/nginx/nginx.conf << 'EOF'
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+    worker_connections 768;
+}
+
+http {
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers on;
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+
+    gzip on;
+
+    include /etc/nginx/conf.d/*.conf;
+    include /etc/nginx/sites-enabled/*;
+}
+
+# OceanProxy Stream Configuration
 stream {
     log_format proxy '$remote_addr [$time_local] '
                     '$protocol $status $bytes_sent $bytes_received '
@@ -590,7 +618,9 @@ EOF
     rm -f /etc/nginx/sites-enabled/default
     
     # Test configuration
-    nginx -t || error "nginx configuration test failed"
+    if ! nginx -t; then
+        error "nginx configuration test failed"
+    fi
     
     log "nginx configured successfully"
 }
