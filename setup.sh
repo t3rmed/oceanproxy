@@ -387,21 +387,21 @@ build_application() {
         error "Backend structure not found. Please check your repository structure."
     fi
     
-    # Get the installed Go version (major.minor format)
-    INSTALLED_GO_VERSION=$(go version | grep -o 'go[0-9]\+\.[0-9]\+' | sed 's/go//')
-    log "Installed Go version: $INSTALLED_GO_VERSION"
+    # Get the ACTUAL installed Go version (we installed 1.21.5)
+    INSTALLED_GO_VERSION="1.21"
+    log "Using Go version: $INSTALLED_GO_VERSION"
     
-    # Fix go.mod version format if needed
+    # Fix go.mod - replace ANY go version with 1.21
     if [[ -f "go.mod" ]]; then
-        log "Current go.mod content before fix:"
+        log "Original go.mod content:"
         cat go.mod
         
-        # Fix invalid version formats like "1.24.4" or versions higher than what we have
-        if grep -q "go 1\." go.mod; then
-            log "Updating go.mod to use installed Go version: $INSTALLED_GO_VERSION"
-            sudo -u "$SERVICE_USER" sed -i "s/go 1\.[0-9]\+\(\.[0-9]\+\)\?/go $INSTALLED_GO_VERSION/" go.mod
-            log "Updated go.mod successfully"
-        fi
+        log "Fixing go.mod to use Go $INSTALLED_GO_VERSION..."
+        # Replace any "go 1.XX" or "go 1.XX.X" with "go 1.21"
+        sudo -u "$SERVICE_USER" sed -i 's/^go [0-9]\+\.[0-9]\+\(\.[0-9]\+\)\?$/go 1.21/' go.mod
+        
+        log "Fixed go.mod content:"
+        cat go.mod
     else
         # Create go.mod if it doesn't exist
         log "Creating go.mod file..."
@@ -409,10 +409,6 @@ build_application() {
         sudo -u "$SERVICE_USER" sed -i "s/go .*/go $INSTALLED_GO_VERSION/" go.mod
         log "Created go.mod with Go version: $INSTALLED_GO_VERSION"
     fi
-    
-    # Show go.mod content after fix
-    log "go.mod content after fix:"
-    cat go.mod
     
     # Initialize Go modules with PATH set
     log "Running go mod tidy..."
