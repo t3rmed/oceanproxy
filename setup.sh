@@ -581,12 +581,23 @@ stream {
 }
 EOF
 
-    # Create HTTP configuration for API and management
+    # Create challenge directory for SSL
+    mkdir -p /var/www/html/.well-known/acme-challenge
+    chown -R www-data:www-data /var/www/html
+
+    # Create HTTP configuration for API and management with SSL support
     cat > /etc/nginx/sites-available/oceanproxy << EOF
 # OceanProxy API and Management
 server {
     listen 80;
     server_name api.$DOMAIN $DOMAIN;
+    
+    # ACME challenge directory for SSL certificates
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+        try_files \$uri \$uri/ =404;
+        allow all;
+    }
     
     # API proxy
     location /api/ {
@@ -751,7 +762,185 @@ start_services() {
     log "Services started successfully"
 }
 
-test_installation() {
+setup_ssl() {
+    if [[ "$SKIP_SSL" == "true" ]]; then
+        log "Skipping SSL setup"
+        return
+    fi
+    
+    log "Setting up SSL certificates..."
+    
+    # Check if domain resolves to this server
+    SERVER_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "unknown")
+    DOMAIN_IP=$(dig +short "$DOMAIN" | tail -n1)
+    API_DOMAIN_IP=$(dig +short "api.$DOMAIN" | tail -n1)
+    
+    log "Server IP: $SERVER_IP"
+    log "Domain IP: $DOMAIN_IP"
+    log "API Domain IP: $API_DOMAIN_IP"
+    
+    if [[ "$SERVER_IP" != "$DOMAIN_IP" ]] && [[ "$SERVER_IP" != "$API_DOMAIN_IP" ]]; then
+        warn "Domain $DOMAIN does not resolve to this server ($SERVER_IP vs $DOMAIN_IP)"
+        warn "SSL setup will be skipped. Configure DNS first, then run:"
+        warn "sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN"
+        return
+    fi
+    
+    # Wait for nginx to be fully started
+    sleep 5
+    
+    # Test if challenge directory is accessible
+    echo "test" > /var/www/html/.well-known/acme-challenge/test
+    TEST_RESPONSE=$(curl -s "http://$DOMAIN/.well-known/acme-challenge/test" || echo "failed")
+    rm -f /var/www/html/.well-known/acme-challenge/test
+    
+    if [[ "$TEST_RESPONSE" != "test" ]]; then
+        warn "ACME challenge directory not accessible. SSL setup may fail."
+        warn "Trying anyway..."
+    else
+        log "ACME challenge directory accessible"
+    fi
+    
+    # Obtain certificates for both main domain and API subdomain
+    log "Obtaining SSL certificate for $DOMAIN and api.$DOMAIN..."
+    if certbot --nginx -d "$DOMAIN" -d "api.$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN" --no-eff-email; then
+        log "SSL certificates obtained successfully"
+        
+        # Setup auto-renewal
+        systemctl enable certbot.timer
+        systemctl start certbot.timer
+        
+        # Add cron job as backup
+        (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet") | crontab -
+        
+        log "SSL auto-renewal configured"
+        
+        # Verify certificates
+        log "Verifying SSL certificates..."
+        if curl -s -f "https://api.$DOMAIN/health" > /dev/null; then
+            log "✅ HTTPS API endpoint working"
+        else
+            warn "⚠️  HTTPS API endpoint not responding (may need time to propagate)"
+        fi
+        
+    else
+        warn "SSL certificate setup failed. You can set it up manually later with:"
+        warn "sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN"
+        warn "Common issues:"
+        warn "  - DNS not pointing to this server"
+        warn "  - Firewall blocking port 80/443"
+        warn "  - nginx not serving challenge files properly"
+    fi
+}
+
+optimize_system() {
+    log "Optimizing system performance..."
+    
+    # Increase file descriptor limits
+    cat >> /etc/security/limits.conf << EOF
+# OceanProxy optimizations
+$SERVICE_USER soft nofile 65536
+$SERVICE_USER hard nofile 65536
+root soft nofile 65536
+root hard nofile 65536
+EOF
+
+    # Kernel parameter tuning
+    cat >> /etc/sysctl.conf << 'EOF'
+# OceanProxy network optimizations
+net.core.somaxconn = 65536
+net.core.netdev_max_backlog = 5000
+net.ipv4.tcp_max_syn_backlog = 65536
+net.ipv4.tcp_fin_timeout = 30
+net.ipv4.tcp_keepalive_time = 1200
+net.ipv4.tcp_keepalive_probes = 5
+net.ipv4.tcp_keepalive_intvl = 15
+net.ipv4.ip_local_port_range = 1024 65535
+net.ipv4.tcp_rmem = 4096 65536 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+EOF
+
+    # Apply kernel parameters
+    sysctl -p
+    
+    # nginx worker optimization
+    CPU_CORES=$(nproc)
+    sed -i "s/worker_processes auto;/worker_processes $CPU_CORES;/" /etc/nginx/nginx.conf
+    sed -i "s/worker_connections 768;/worker_connections 4096;/" /etc/nginx/nginx.conf
+    
+    log "System optimizations applied"
+}
+
+setup_monitoring() {
+    log "Setting up monitoring and logging..."
+    
+    # Create log rotation configuration
+    cat > /etc/logrotate.d/oceanproxy << 'EOF'
+/var/log/oceanproxy/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 644 oceanproxy oceanproxy
+    postrotate
+        systemctl reload nginx > /dev/null 2>&1 || true
+        systemctl reload oceanproxy-api > /dev/null 2>&1 || true
+    endscript
+}
+
+/var/log/oceanproxy/nginx/*.log {
+    daily
+    missingok
+    rotate 7
+    compress
+    delaycompress
+    notifempty
+    create 644 nginx nginx
+    postrotate
+        systemctl reload nginx > /dev/null 2>&1 || true
+    endscript
+}
+EOF
+
+    # Create backup script
+    cat > "$INSTALL_DIR/scripts/backup.sh" << 'EOF'
+#!/bin/bash
+# OceanProxy Backup Script
+
+BACKUP_DIR="/opt/oceanproxy/backups"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# Create backup directory
+mkdir -p "$BACKUP_DIR"
+
+# Backup proxy data
+cp /var/log/oceanproxy/proxies.json "$BACKUP_DIR/proxies_$DATE.json"
+
+# Backup configuration
+tar -czf "$BACKUP_DIR/config_$DATE.tar.gz" \
+    /opt/oceanproxy/app/backend/exec/.env \
+    /etc/nginx/nginx.conf \
+    /etc/nginx/sites-available/oceanproxy
+
+# Keep only last 7 days of backups
+find "$BACKUP_DIR" -name "*.json" -mtime +7 -delete
+find "$BACKUP_DIR" -name "*.tar.gz" -mtime +7 -delete
+
+echo "Backup completed: $DATE"
+EOF
+
+    chmod +x "$INSTALL_DIR/scripts/backup.sh"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts/backup.sh"
+    
+    # Add backup to crontab
+    (crontab -u "$SERVICE_USER" -l 2>/dev/null; echo "0 3 * * * $INSTALL_DIR/scripts/backup.sh") | crontab -u "$SERVICE_USER" -
+    
+    log "Monitoring and logging setup complete"
+}
     log "Testing installation..."
     
     # Test API health
@@ -807,7 +996,12 @@ print_summary() {
     echo "  • API Port: $API_PORT"
     echo
     echo -e "${GREEN}🌐 Service Endpoints:${NC}"
-    echo "  • API Health: http://localhost:$API_PORT/health"
+    echo "  • API Health (HTTP): http://localhost:$API_PORT/health"
+    echo "  • API Health (External): http://$DOMAIN/health"
+    if [[ -d /etc/letsencrypt/live ]]; then
+        echo "  • API Health (HTTPS): https://api.$DOMAIN/health"
+        echo "  • Main Site (HTTPS): https://$DOMAIN"
+    fi
     echo "  • USA Proxy: usa.$DOMAIN:1337"
     echo "  • EU Proxy: eu.$DOMAIN:1338" 
     echo "  • Alpha Proxy: alpha.$DOMAIN:9876"
@@ -818,31 +1012,63 @@ print_summary() {
     echo "  • Create plan: curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN' \\"
     echo "                      -d 'reseller=residential&bandwidth=5&username=USER&password=PASS' \\"
     echo "                      http://localhost:$API_PORT/plan"
+    echo "  • Test SSL: curl https://api.$DOMAIN/health"
     echo
     echo -e "${GREEN}📁 Important Files:${NC}"
     echo "  • Configuration: $INSTALL_DIR/app/backend/exec/.env"
     echo "  • Proxy Database: $LOG_DIR/proxies.json"
-    echo "  • nginx Config: /etc/nginx/conf.d/oceanproxy-stream.conf"
+    echo "  • nginx Config: /etc/nginx/nginx.conf"
     echo "  • Scripts: $INSTALL_DIR/app/backend/scripts/"
+    echo "  • SSL Certificates: /etc/letsencrypt/live/ (if configured)"
+    echo
+    echo -e "${GREEN}🔐 SSL Status:${NC}"
+    if [[ -d /etc/letsencrypt/live ]]; then
+        echo "  • SSL certificates: ✅ Configured and active"
+        echo "  • Auto-renewal: ✅ Enabled via certbot.timer"
+        echo "  • HTTPS endpoints: https://api.$DOMAIN/health"
+    else
+        echo "  • SSL certificates: ⚠️  Not configured yet"
+        echo "  • Run: sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN"
+    fi
     echo
     echo -e "${GREEN}📈 Next Steps:${NC}"
-    echo "  1. Update DNS records to point subdomains to this server"
-    echo "  2. Test proxy creation: curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN' \\"
-    echo "                               -d 'reseller=residential&bandwidth=1&username=test&password=test123' \\"
-    echo "                               http://localhost:$API_PORT/plan"
-    echo "  3. Build customer dashboard frontend"
-    echo "  4. Integrate payment processing"
-    echo "  5. Set up monitoring and alerting"
+    echo "  1. Verify DNS records point to this server IP: $(curl -s ifconfig.me || echo 'unknown')"
+    echo "  2. Test SSL setup: curl https://api.$DOMAIN/health"
+    echo "  3. Create test proxy: curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN' \\"
+    echo "                             -d 'reseller=residential&bandwidth=1&username=test&password=test123' \\"
+    echo "                             http://localhost:$API_PORT/plan"
+    echo "  4. Build customer dashboard frontend"
+    echo "  5. Integrate payment processing"
+    echo "  6. Set up monitoring and alerting"
     echo
     echo -e "${YELLOW}⚠️  Important Notes:${NC}"
     echo "  • Keep your API keys secure and rotate them regularly"
-    echo "  • Monitor log files for any issues"
-    echo "  • Set up regular backups of proxy data"
-    echo "  • Test your setup before accepting customers"
+    echo "  • Monitor log files for any issues: sudo tail -f $LOG_DIR/api.log"
+    echo "  • SSL certificates auto-renew via certbot.timer"
+    echo "  • Backup script runs daily at 3 AM: $INSTALL_DIR/scripts/backup.sh"
+    echo "  • System optimizations applied for high performance"
+    echo "  • Firewall configured - ensure DNS points to: $(curl -s ifconfig.me || echo 'unknown')"
+    echo
+    echo -e "${GREEN}🔧 SSL Setup Commands (if needed):${NC}"
+    echo "  • Manual SSL setup: sudo certbot --nginx -d $DOMAIN -d api.$DOMAIN"
+    echo "  • Check certificates: sudo certbot certificates"
+    echo "  • Test renewal: sudo certbot renew --dry-run"
+    echo "  • View SSL logs: sudo tail -f /var/log/letsencrypt/letsencrypt.log"
+    echo
+    echo -e "${GREEN}🚨 Troubleshooting Commands:${NC}"
+    echo "  • Check services: sudo systemctl status nginx oceanproxy-api"
+    echo "  • Test API manually: curl http://localhost:$API_PORT/health"
+    echo "  • Check ports: sudo netstat -tlnp | grep -E ':(80|443|1337|1338|9876|$API_PORT)'"
+    echo "  • View nginx logs: sudo tail -f /var/log/nginx/error.log"
+    echo "  • Restart services: sudo systemctl restart nginx oceanproxy-api"
     echo
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo
-    log "Your OceanProxy whitelabel service is ready! 🌊💰"
+    if [[ -d /etc/letsencrypt/live ]]; then
+        log "Your OceanProxy whitelabel service is ready with SSL! 🌊🔐💰"
+    else
+        log "Your OceanProxy whitelabel service is ready! Configure SSL for production use. 🌊💰"
+    fi
     echo
 }
 
@@ -904,7 +1130,14 @@ main() {
     configure_nginx
     create_systemd_services
     configure_firewall
+    optimize_system
+    setup_monitoring
     start_services
+    
+    # Setup SSL after services are running
+    if [[ "$SKIP_SSL" != "true" ]]; then
+        setup_ssl
+    fi
     
     # Testing
     test_installation
