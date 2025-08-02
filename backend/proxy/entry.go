@@ -32,12 +32,12 @@ func NewEntry(planID, user, pass, upstreamHost string, publicPort int, subdomain
 		"unlim":      60000,
 		"datacenter": 70000,
 	}
-	
+
 	basePort := localPortMap[subdomain]
 	if basePort == 0 {
 		basePort = 10000 // fallback
 	}
-	
+
 	return Entry{
 		PlanID:     planID,
 		Username:   user,

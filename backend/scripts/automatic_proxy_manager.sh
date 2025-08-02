@@ -1,19 +1,28 @@
 #!/bin/bash
 
 # Automatic Proxy Manager - HTTP Proxy Whitelabel Service
+# Updated with 2000 port limits per type and new proxy endpoints
 
 PROXY_LOG="/var/log/oceanproxy/proxies.json"
 CONFIG_DIR="/etc/3proxy/plans"
 
-# Port ranges for each plan type (internal ports)
+# Port ranges for each plan type (2000 ports each)
 declare -A PORT_RANGES
 PORT_RANGES["pr-us.proxies.fo_usa"]="10000"
-PORT_RANGES["pr-eu.proxies.fo_eu"]="20000"
-PORT_RANGES["proxy.nettify.xyz_alpha"]="30000"
-PORT_RANGES["proxy.nettify.xyz_beta"]="40000"
-PORT_RANGES["proxy.nettify.xyz_mobile"]="50000"
-PORT_RANGES["proxy.nettify.xyz_unlim"]="60000"
-PORT_RANGES["dcp.proxies.fo_datacenter"]="40000"
+PORT_RANGES["pr-eu.proxies.fo_eu"]="12000"
+PORT_RANGES["proxy.nettify.xyz_alpha"]="14000"
+PORT_RANGES["proxy.nettify.xyz_beta"]="16000"
+PORT_RANGES["proxy.nettify.xyz_mobile"]="18000"
+PORT_RANGES["proxy.nettify.xyz_unlim"]="20000"
+PORT_RANGES["dcp.proxies.fo_datacenter"]="22000"
+PORT_RANGES["blank_gamma"]="24000"
+PORT_RANGES["blank_delta"]="26000"
+PORT_RANGES["blank_epsilon"]="28000"
+PORT_RANGES["blank_zeta"]="30000"
+PORT_RANGES["blank_eta"]="32000"
+
+# Maximum ports per type
+MAX_PORTS_PER_TYPE=2000
 
 # Public ports (client-facing)
 declare -A PUBLIC_PORTS
@@ -24,6 +33,11 @@ PUBLIC_PORTS["proxy.nettify.xyz_beta"]="8765"
 PUBLIC_PORTS["proxy.nettify.xyz_mobile"]="7654"
 PUBLIC_PORTS["proxy.nettify.xyz_unlim"]="6543"
 PUBLIC_PORTS["dcp.proxies.fo_datacenter"]="1339"
+PUBLIC_PORTS["blank_gamma"]="5432"
+PUBLIC_PORTS["blank_delta"]="4321"
+PUBLIC_PORTS["blank_epsilon"]="3210"
+PUBLIC_PORTS["blank_zeta"]="2109"
+PUBLIC_PORTS["blank_eta"]="1098"
 
 # Subdomain mapping
 declare -A SUBDOMAINS
@@ -34,8 +48,14 @@ SUBDOMAINS["proxy.nettify.xyz_beta"]="beta"
 SUBDOMAINS["proxy.nettify.xyz_mobile"]="mobile"
 SUBDOMAINS["proxy.nettify.xyz_unlim"]="unlim"
 SUBDOMAINS["dcp.proxies.fo_datacenter"]="datacenter"
+SUBDOMAINS["blank_gamma"]="gamma"
+SUBDOMAINS["blank_delta"]="delta"
+SUBDOMAINS["blank_epsilon"]="epsilon"
+SUBDOMAINS["blank_zeta"]="zeta"
+SUBDOMAINS["blank_eta"]="eta"
 
 echo "🚀 HTTP Proxy Whitelabel Manager - Rebuilding entire system..."
+echo "   Port limits: 2000 ports per proxy type"
 
 mkdir -p "$CONFIG_DIR"
 
@@ -58,6 +78,7 @@ declare -A USED_PORTS
 declare -A USED_CONFIGS
 declare -A PLAN_GROUPS
 declare -A PLAN_SERVERS
+declare -A PORT_COUNTS  # Track port usage per type
 
 echo "📋 Analyzing plans..."
 while IFS= read -r entry; do
@@ -70,7 +91,13 @@ while IFS= read -r entry; do
 
     [[ "$plan_id" == "null" || "$username" == "null" ]] && continue
 
-    PLAN_TYPE="${auth_host}_${subdomain}"
+    # Handle blank proxy types
+    if [[ "$auth_host" == "blank" ]] || [[ "$auth_host" == "" ]] || [[ "$auth_host" == "null" ]]; then
+        PLAN_TYPE="blank_${subdomain}"
+    else
+        PLAN_TYPE="${auth_host}_${subdomain}"
+    fi
+    
     PLAN_GROUPS[$PLAN_TYPE]+="${entry}|"
 
 done < <(jq -c '.[]' "$PROXY_LOG")
@@ -90,15 +117,22 @@ for plan_type in "${!PLAN_GROUPS[@]}"; do
     }
 
     echo "   📡 Public endpoint: ${subdomain}.oceanproxy.io:${public_port}"
-    echo "   🔢 Internal port range: $base_port+"
+    echo "   🔢 Internal port range: $base_port-$((base_port + MAX_PORTS_PER_TYPE - 1))"
 
     PLAN_SERVERS[$plan_type]=""
     current_port=$base_port
     plan_count=0
+    PORT_COUNTS[$plan_type]=0
 
     IFS='|' read -ra PLANS <<< "${PLAN_GROUPS[$plan_type]}"
     for plan_entry in "${PLANS[@]}"; do
         [[ -z "$plan_entry" ]] && continue
+
+        # Check if we've reached the port limit
+        if [[ ${PORT_COUNTS[$plan_type]} -ge $MAX_PORTS_PER_TYPE ]]; then
+            echo "   ⚠️ Reached maximum port limit (2000) for $plan_type, skipping remaining plans"
+            break
+        fi
 
         plan_id=$(echo "$plan_entry" | jq -r '.plan_id')
         username=$(echo "$plan_entry" | jq -r '.username')
@@ -111,17 +145,50 @@ for plan_type in "${!PLAN_GROUPS[@]}"; do
         [[ ${USED_CONFIGS[$config_key]} ]] && continue
         USED_CONFIGS[$config_key]=1
 
-        while [[ ${USED_PORTS[$current_port]} ]]; do
+        # Find next available port within the 2000 port range
+        max_port=$((base_port + MAX_PORTS_PER_TYPE - 1))
+        while [[ ${USED_PORTS[$current_port]} ]] && [[ $current_port -le $max_port ]]; do
             ((current_port++))
         done
+        
+        if [[ $current_port -gt $max_port ]]; then
+            echo "   ❌ No more available ports in range for $plan_type"
+            break
+        fi
+        
         USED_PORTS[$current_port]=1
+        ((PORT_COUNTS[$plan_type]++))
 
         echo "   🔄 Plan $plan_id ($username) → Internal port $current_port"
         echo "      Client connects: ${subdomain}.oceanproxy.io:${public_port}:${username}:${password}"
-        echo "      Routes through: 127.0.0.1:$current_port → $auth_host:$auth_port"
+        
+        # Handle blank proxy types
+        if [[ "$auth_host" == "blank" ]] || [[ "$auth_host" == "" ]] || [[ "$auth_host" == "null" ]]; then
+            echo "      ⚠️ Blank proxy type - no upstream configured"
+            config_file="${CONFIG_DIR}/${plan_id}_${plan_subdomain}.cfg"
+            cat << EOF > "$config_file"
+# 3proxy config for blank proxy type: $username
+# Plan ID: $plan_id
+# Subdomain: $plan_subdomain
+# Client endpoint: ${subdomain}.oceanproxy.io:${public_port}:${username}:${password}
+# Internal port: $current_port
+# Upstream: NONE (blank proxy)
 
-        config_file="${CONFIG_DIR}/${plan_id}_${plan_subdomain}.cfg"
-        cat << EOF > "$config_file"
+nscache 65536
+timeouts 1 5 30 60 180 1800 15 60
+maxconn 512
+
+users $username:CL:$password
+auth strong
+allow $username
+
+# Blank proxy - direct connection without upstream
+proxy -n -a -p$current_port -i0.0.0.0 -e0.0.0.0
+EOF
+        else
+            echo "      Routes through: 127.0.0.1:$current_port → $auth_host:$auth_port"
+            config_file="${CONFIG_DIR}/${plan_id}_${plan_subdomain}.cfg"
+            cat << EOF > "$config_file"
 # 3proxy config for user: $username
 # Plan ID: $plan_id
 # Subdomain: $plan_subdomain
@@ -141,11 +208,12 @@ parent 1000 http $auth_host $auth_port $username $password
 
 proxy -n -a -p$current_port -i0.0.0.0 -e0.0.0.0
 EOF
+        fi
 
         echo "      🚀 Starting 3proxy for user $username on port $current_port"
         nohup /usr/bin/3proxy "$config_file" > "/var/log/3proxy_${plan_id}_${plan_subdomain}.log" 2>&1 &
 
-        PLAN_SERVERS[$plan_type]+=$'\n'"    server 127.0.0.1:$current_port;"
+        PLAN_SERVERS[$plan_type]+=\n'"    server 127.0.0.1:$current_port;"
 
         jq --arg plan_id "$plan_id" --arg subdomain "$plan_subdomain" --arg port "$current_port" \
             '(.[] | select(.plan_id == $plan_id and .subdomain == $subdomain) | .local_port) = ($port | tonumber)' \
@@ -157,6 +225,7 @@ EOF
     done
 
     echo "   📝 Created $plan_count individual proxy instances for $plan_type"
+    echo "   📊 Port usage: ${PORT_COUNTS[$plan_type]}/$MAX_PORTS_PER_TYPE"
 done
 
 echo -e "\n🔄 Updating nginx configuration for HTTP proxy load balancing..."
@@ -225,19 +294,35 @@ echo "   Total proxy plans: $(jq length "$PROXY_LOG")"
 echo "   Active 3proxy instances: $(pgrep -fc 3proxy)"
 echo "   Plan types configured: ${#PLAN_GROUPS[@]}"
 echo ""
+echo "📊 Port Usage by Type (Max 2000 per type):"
+for plan_type in "${!PORT_COUNTS[@]}"; do
+    sub=${SUBDOMAINS[$plan_type]}
+    count=${PORT_COUNTS[$plan_type]}
+    percent=$((count * 100 / MAX_PORTS_PER_TYPE))
+    echo "   $sub: $count/$MAX_PORTS_PER_TYPE ($percent% used)"
+done
+echo ""
 echo "🌐 Whitelabel Proxy Endpoints:"
 for plan_type in "${!PLAN_GROUPS[@]}"; do
     sub=${SUBDOMAINS[$plan_type]}
     port=${PUBLIC_PORTS[$plan_type]}
     [[ -z "$sub" || -z "$port" ]] && continue
-    count=$(echo "${PLAN_GROUPS[$plan_type]}" | tr '|' '\n' | wc -l)
+    count=${PORT_COUNTS[$plan_type]:-0}
     echo "   $sub.oceanproxy.io:$port → $count users"
 
     plan_sample=$(echo "${PLAN_GROUPS[$plan_type]}" | cut -d'|' -f1)
-    user=$(echo "$plan_sample" | jq -r '.username')
-    pass=$(echo "$plan_sample" | jq -r '.password')
-    echo "     Example: curl -x $sub.oceanproxy.io:$port -U $user:$pass http://httpbin.org/ip"
+    if [[ -n "$plan_sample" ]]; then
+        user=$(echo "$plan_sample" | jq -r '.username')
+        pass=$(echo "$plan_sample" | jq -r '.password')
+        echo "     Example: curl -x $sub.oceanproxy.io:$port -U $user:$pass http://httpbin.org/ip"
+    fi
 done
 echo ""
-echo "📋 Flow: Client → nginx → 3proxy → Upstream Provider"
-
+echo "🆕 New Blank Proxy Endpoints Available:"
+echo "   gamma.oceanproxy.io:5432"
+echo "   delta.oceanproxy.io:4321"
+echo "   epsilon.oceanproxy.io:3210"
+echo "   zeta.oceanproxy.io:2109"
+echo "   eta.oceanproxy.io:1098"
+echo ""
+echo "📋 Flow: Client → nginx → 3proxy → Upstream Provider (or direct for blank types)"

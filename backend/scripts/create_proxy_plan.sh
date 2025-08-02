@@ -1,6 +1,6 @@
 #!/bin/bash
 # create_proxy_plan.sh - Create individual HTTP proxy plan with instant nginx integration
-# No need to run automatic_proxy_manager.sh after this!
+# Updated with 2000 port limits per type and new proxy endpoints
 
 # === Args ===
 PLAN_ID="$1"
@@ -21,6 +21,8 @@ if [ $# -lt 7 ]; then
     echo "This creates a whitelabel proxy where:"
     echo "  Client connects: usa.oceanproxy.io:1337:john:mypass"
     echo "  Routes through: 127.0.0.1:10001 → pr-us.proxies.fo:13337:john:mypass"
+    echo ""
+    echo "Available subdomains: usa, eu, alpha, beta, mobile, unlim, datacenter, gamma, delta, epsilon, zeta, eta"
     exit 1
 fi
 
@@ -28,6 +30,21 @@ CONFIG_DIR="/etc/3proxy/plans"
 CONFIG_FILE="${CONFIG_DIR}/${PLAN_ID}_${SUBDOMAIN}.cfg"
 PROXY_LOG="/var/log/oceanproxy/proxies.json"
 STREAM_CONFIG="/etc/nginx/stream.d"
+
+# Port ranges (2000 ports each)
+declare -A PORT_RANGES
+PORT_RANGES["usa"]="10000-11999"
+PORT_RANGES["eu"]="12000-13999"
+PORT_RANGES["alpha"]="14000-15999"
+PORT_RANGES["beta"]="16000-17999"
+PORT_RANGES["mobile"]="18000-19999"
+PORT_RANGES["unlim"]="20000-21999"
+PORT_RANGES["datacenter"]="22000-23999"
+PORT_RANGES["gamma"]="24000-25999"
+PORT_RANGES["delta"]="26000-27999"
+PORT_RANGES["epsilon"]="28000-29999"
+PORT_RANGES["zeta"]="30000-31999"
+PORT_RANGES["eta"]="32000-33999"
 
 # Public port mapping based on subdomain
 declare -A PUBLIC_PORTS
@@ -38,6 +55,11 @@ PUBLIC_PORTS["beta"]="8765"
 PUBLIC_PORTS["mobile"]="7654"
 PUBLIC_PORTS["unlim"]="6543"
 PUBLIC_PORTS["datacenter"]="1339"
+PUBLIC_PORTS["gamma"]="5432"
+PUBLIC_PORTS["delta"]="4321"
+PUBLIC_PORTS["epsilon"]="3210"
+PUBLIC_PORTS["zeta"]="2109"
+PUBLIC_PORTS["eta"]="1098"
 
 # Plan type mapping for upstream names
 declare -A PLAN_TYPES
@@ -48,9 +70,15 @@ PLAN_TYPES["beta"]="proxy.nettify.xyz_beta"
 PLAN_TYPES["mobile"]="proxy.nettify.xyz_mobile"
 PLAN_TYPES["unlim"]="proxy.nettify.xyz_unlim"
 PLAN_TYPES["datacenter"]="dcp.proxies.fo_datacenter"
+PLAN_TYPES["gamma"]="blank_gamma"
+PLAN_TYPES["delta"]="blank_delta"
+PLAN_TYPES["epsilon"]="blank_epsilon"
+PLAN_TYPES["zeta"]="blank_zeta"
+PLAN_TYPES["eta"]="blank_eta"
 
 PUBLIC_PORT=${PUBLIC_PORTS[$SUBDOMAIN]}
 PLAN_TYPE=${PLAN_TYPES[$SUBDOMAIN]}
+PORT_RANGE=${PORT_RANGES[$SUBDOMAIN]}
 
 mkdir -p "$CONFIG_DIR"
 mkdir -p "/var/log/oceanproxy"
@@ -59,8 +87,16 @@ mkdir -p "$STREAM_CONFIG"
 echo "🔧 Creating whitelabel HTTP proxy plan: $PLAN_ID [$SUBDOMAIN]"
 echo "   👤 Username: $USERNAME"
 echo "   🔌 Local Port: $LOCAL_PORT"
+echo "   📊 Port Range: $PORT_RANGE (2000 ports max)"
 echo "   🌐 Public Endpoint: ${SUBDOMAIN}.oceanproxy.io:${PUBLIC_PORT}"
 echo "   📡 Upstream: $UPSTREAM_HOST:$UPSTREAM_PORT"
+
+# === Validate port is within allowed range ===
+IFS='-' read -r MIN_PORT MAX_PORT <<< "$PORT_RANGE"
+if [[ $LOCAL_PORT -lt $MIN_PORT ]] || [[ $LOCAL_PORT -gt $MAX_PORT ]]; then
+    echo "❌ Port $LOCAL_PORT is outside allowed range $PORT_RANGE for subdomain $SUBDOMAIN"
+    exit 1
+fi
 
 # === Kill any existing process using the port ===
 EXISTING_PID=$(lsof -tiTCP:$LOCAL_PORT 2>/dev/null)
@@ -79,9 +115,13 @@ case "$UPSTREAM_HOST" in
     dcp.proxies.fo|pr-us.proxies.fo|pr-eu.proxies.fo|proxy.nettify.xyz)
         echo "✅ Valid upstream host: $UPSTREAM_HOST"
         ;;
+    blank|"")
+        echo "⚠️ Blank proxy type - no upstream will be configured"
+        UPSTREAM_HOST="blank"
+        ;;
     *)
         echo "⚠️ Unknown upstream host: $UPSTREAM_HOST"
-        echo "   Supported hosts: dcp.proxies.fo, pr-us.proxies.fo, pr-eu.proxies.fo, proxy.nettify.xyz"    
+        echo "   Supported hosts: dcp.proxies.fo, pr-us.proxies.fo, pr-eu.proxies.fo, proxy.nettify.xyz, blank"
         exit 1
         ;;
 esac
@@ -89,13 +129,37 @@ esac
 # === Validate subdomain has corresponding public port ===
 if [ -z "$PUBLIC_PORT" ] || [ -z "$PLAN_TYPE" ]; then
     echo "❌ Invalid subdomain: $SUBDOMAIN"
-    echo "   Supported subdomains: usa, eu, alpha, beta, mobile, unlim"
+    echo "   Supported subdomains: usa, eu, alpha, beta, mobile, unlim, datacenter, gamma, delta, epsilon, zeta, eta"
     exit 1
 fi
 
 # === Generate the 3proxy config ===
 echo "📝 Creating individual 3proxy config..."
-cat << EOF > "$CONFIG_FILE"
+
+if [[ "$UPSTREAM_HOST" == "blank" ]]; then
+    # Blank proxy configuration (no upstream)
+    cat << EOF > "$CONFIG_FILE"
+# 3proxy config for whitelabel HTTP proxy (BLANK TYPE)
+# Plan ID: $PLAN_ID
+# User: $USERNAME
+# Client endpoint: ${SUBDOMAIN}.oceanproxy.io:${PUBLIC_PORT}:${USERNAME}:${PASSWORD}
+# Internal port: $LOCAL_PORT
+# Upstream: NONE (blank proxy - direct connection)
+
+nscache 65536
+timeouts 1 5 30 60 180 1800 15 60
+
+# Authentication for this specific user
+users $USERNAME:CL:$PASSWORD
+auth strong
+allow $USERNAME
+
+# HTTP proxy listening on port $LOCAL_PORT (no parent)
+proxy -n -a -p$LOCAL_PORT -i0.0.0.0 -e0.0.0.0
+EOF
+else
+    # Regular proxy configuration (with upstream)
+    cat << EOF > "$CONFIG_FILE"
 # 3proxy config for whitelabel HTTP proxy
 # Plan ID: $PLAN_ID
 # User: $USERNAME
@@ -117,6 +181,7 @@ parent 1000 http $UPSTREAM_HOST $UPSTREAM_PORT $USERNAME $PASSWORD
 # HTTP proxy listening on port $LOCAL_PORT
 proxy -n -a -p$LOCAL_PORT -i0.0.0.0 -e0.0.0.0
 EOF
+fi
 
 # === Launch 3proxy with the new config ===
 echo "🚀 Starting 3proxy on port $LOCAL_PORT for user $USERNAME"
@@ -236,6 +301,11 @@ else
     nginx -t
 fi
 
+# === Count current port usage ===
+PORT_COUNT=$(jq --arg subdomain "$SUBDOMAIN" '[.[] | select(.subdomain == $subdomain)] | length' "$PROXY_LOG")
+echo ""
+echo "📊 Port Usage for $SUBDOMAIN: $PORT_COUNT/2000"
+
 # === Show connection info ===
 echo ""
 echo "🎉 Whitelabel HTTP Proxy Plan Created & Active!"
@@ -248,7 +318,11 @@ echo ""
 echo "🔄 Traffic Flow:"
 echo "   Client → nginx (${SUBDOMAIN}.oceanproxy.io:${PUBLIC_PORT})"
 echo "          → 3proxy (127.0.0.1:${LOCAL_PORT})"
-echo "          → Upstream (${UPSTREAM_HOST}:${UPSTREAM_PORT})"
+if [[ "$UPSTREAM_HOST" != "blank" ]]; then
+    echo "          → Upstream (${UPSTREAM_HOST}:${UPSTREAM_PORT})"
+else
+    echo "          → Direct connection (no upstream)"
+fi
 echo ""
 echo "🧪 Test Commands:"
 echo "   # HTTP Proxy Test (Client-facing):"
