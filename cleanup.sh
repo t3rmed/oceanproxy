@@ -2,8 +2,9 @@
 
 # 🧹 OceanProxy Complete Cleanup Script
 # This script removes EVERYTHING installed by the OceanProxy setup script
+# Updated to handle 12 proxy endpoints and new port configurations
 # Author: OceanProxy Team
-# Version: 1.0.0
+# Version: 1.1.0
 
 set -euo pipefail
 
@@ -15,7 +16,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"  # Updated version
 INSTALL_DIR="/opt/oceanproxy"
 LOG_DIR="/var/log/oceanproxy"
 CONFIG_DIR="/etc/oceanproxy"
@@ -47,6 +48,7 @@ banner() {
     ╔═══════════════════════════════════════════════════════════╗
     ║                🧹 OceanProxy Cleanup                      ║
     ║          Complete Removal of All Components              ║
+    ║         Including All 12 Proxy Endpoints                 ║
     ║                                                           ║
     ║        ⚠️  THIS WILL DELETE EVERYTHING! ⚠️                ║
     ╚═══════════════════════════════════════════════════════════╝
@@ -99,12 +101,14 @@ confirm_cleanup() {
     
     echo
     warn "This will PERMANENTLY DELETE all OceanProxy components:"
-    echo "  • All proxy services and configurations"
+    echo "  • All 12 proxy endpoints and their configurations"
+    echo "  • All proxy services (up to 24,000 proxies)"
     echo "  • User data and logs"
     echo "  • nginx configurations"
     echo "  • System services"
-    echo "  • Firewall rules"
+    echo "  • Firewall rules (12 proxy ports)"
     echo "  • SSL certificates (if any)"
+    echo "  • Port monitoring scripts"
     
     if [[ "$KEEP_DEPS" != "true" ]]; then
         echo "  • System dependencies (nginx, fail2ban, etc.)"
@@ -146,8 +150,16 @@ stop_services() {
     systemctl disable oceanproxy-cleanup.timer 2>/dev/null || true
     
     # Kill any remaining 3proxy processes
+    log "Killing all 3proxy processes..."
     pkill -f 3proxy 2>/dev/null || true
     pkill -f oceanproxy 2>/dev/null || true
+    
+    # Wait for processes to die
+    sleep 2
+    
+    # Force kill if still running
+    pkill -9 -f 3proxy 2>/dev/null || true
+    pkill -9 -f oceanproxy 2>/dev/null || true
     
     # Stop nginx if we're not keeping it
     if [[ "$KEEP_NGINX" != "true" ]]; then
@@ -182,6 +194,9 @@ remove_nginx_configs() {
     rm -f /etc/nginx/sites-available/oceanproxy
     rm -f /etc/nginx/sites-enabled/oceanproxy
     
+    # Remove stream configurations directory
+    rm -rf /etc/nginx/stream.d
+    
     # Restore original nginx.conf if backup exists
     if [[ -f /etc/nginx/nginx.conf.backup ]]; then
         log "Restoring original nginx configuration..."
@@ -190,6 +205,9 @@ remove_nginx_configs() {
     else
         warn "No nginx backup found, you may need to reinstall nginx configuration manually"
     fi
+    
+    # Remove all nginx.conf backups created by the setup script
+    rm -f /etc/nginx/nginx.conf.backup.* 2>/dev/null || true
     
     # Test nginx configuration
     if [[ "$KEEP_NGINX" == "true" ]] || [[ "$KEEP_DEPS" == "true" ]]; then
@@ -241,7 +259,7 @@ remove_ssl_certificates() {
 }
 
 remove_firewall_rules() {
-    log "Removing firewall rules..."
+    log "Removing firewall rules for all 12 proxy endpoints..."
     
     # Check OS type for firewall management
     if [[ -f /etc/os-release ]]; then
@@ -259,12 +277,24 @@ remove_firewall_rules() {
                 fi
                 ;;
             centos|rhel|rocky|almalinux)
-                # Remove specific firewall rules
+                # Remove specific firewall rules for all proxy ports
                 if systemctl is-active --quiet firewalld; then
-                    log "Removing firewall rules..."
+                    log "Removing firewall rules for all proxy ports..."
+                    # Original ports
                     firewall-cmd --permanent --remove-port=1337/tcp 2>/dev/null || true
                     firewall-cmd --permanent --remove-port=1338/tcp 2>/dev/null || true
                     firewall-cmd --permanent --remove-port=9876/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=8765/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=7654/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=6543/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=1339/tcp 2>/dev/null || true
+                    # New ports
+                    firewall-cmd --permanent --remove-port=5432/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=4321/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=3210/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=2109/tcp 2>/dev/null || true
+                    firewall-cmd --permanent --remove-port=1098/tcp 2>/dev/null || true
+                    # API port
                     firewall-cmd --permanent --remove-port=9090/tcp 2>/dev/null || true
                     firewall-cmd --reload 2>/dev/null || true
                 fi
@@ -291,6 +321,21 @@ remove_fail2ban_config() {
     log "fail2ban configuration removed"
 }
 
+remove_3proxy_configs() {
+    log "Removing all 3proxy configurations..."
+    
+    # Remove 3proxy config directory
+    rm -rf /etc/3proxy/plans
+    
+    # Remove individual 3proxy configs if they exist elsewhere
+    find /etc -name "*3proxy*oceanproxy*" -type f -delete 2>/dev/null || true
+    
+    # Remove 3proxy logs
+    rm -f /var/log/3proxy_* 2>/dev/null || true
+    
+    log "3proxy configurations removed"
+}
+
 remove_user_and_directories() {
     log "Removing user and directories..."
     
@@ -305,12 +350,18 @@ remove_user_and_directories() {
     rm -rf "$LOG_DIR"
     rm -rf "$CONFIG_DIR"
     
+    # Remove 3proxy config directory
+    rm -rf /etc/3proxy
+    
     # Remove log rotation config
     rm -f /etc/logrotate.d/oceanproxy
     
     # Remove any remaining process files
     rm -f /run/oceanproxy.pid
     rm -f /var/run/oceanproxy.pid
+    
+    # Remove any backup directories
+    rm -rf /opt/oceanproxy/backups
     
     log "Directories and user removed"
 }
@@ -348,7 +399,7 @@ remove_dependencies() {
                 fi
                 
                 # Remove other OceanProxy-specific dependencies
-                apt remove -y 3proxy supervisor 2>/dev/null || true
+                apt remove -y 3proxy supervisor bc 2>/dev/null || true
                 
                 # Remove fail2ban, ufw, certbot (optional)
                 read -p "Remove security tools (fail2ban, ufw, certbot)? (y/N): " -n 1 -r
@@ -364,7 +415,7 @@ remove_dependencies() {
                     yum remove -y nginx 2>/dev/null || true
                 fi
                 
-                yum remove -y supervisor 2>/dev/null || true
+                yum remove -y supervisor bc 2>/dev/null || true
                 
                 read -p "Remove security tools (fail2ban, firewalld, certbot)? (y/N): " -n 1 -r
                 echo
@@ -413,6 +464,33 @@ cleanup_git_credentials() {
     log "Git credentials cleaned up"
 }
 
+cleanup_kernel_optimizations() {
+    log "Removing kernel optimizations..."
+    
+    # Remove OceanProxy optimizations from sysctl.conf
+    if [[ -f /etc/sysctl.conf ]]; then
+        # Create backup
+        cp /etc/sysctl.conf /etc/sysctl.conf.backup
+        
+        # Remove OceanProxy optimizations
+        sed -i '/# OceanProxy network optimizations/,/^$/d' /etc/sysctl.conf
+        
+        # Apply changes
+        sysctl -p 2>/dev/null || true
+    fi
+    
+    # Remove file descriptor limits
+    if [[ -f /etc/security/limits.conf ]]; then
+        # Create backup
+        cp /etc/security/limits.conf /etc/security/limits.conf.backup
+        
+        # Remove OceanProxy limits
+        sed -i '/# OceanProxy optimizations/,/^$/d' /etc/security/limits.conf
+    fi
+    
+    log "Kernel optimizations removed"
+}
+
 verify_cleanup() {
     log "Verifying cleanup..."
     
@@ -427,7 +505,7 @@ verify_cleanup() {
     
     # Check for remaining files
     REMAINING_FILES=0
-    for dir in "$INSTALL_DIR" "$LOG_DIR" "$CONFIG_DIR"; do
+    for dir in "$INSTALL_DIR" "$LOG_DIR" "$CONFIG_DIR" "/etc/3proxy"; do
         if [[ -d "$dir" ]]; then
             ((REMAINING_FILES++))
         fi
@@ -457,6 +535,16 @@ verify_cleanup() {
         log "✅ All nginx configurations removed"
     fi
     
+    # Check for remaining firewall rules (on Ubuntu/Debian)
+    if command -v ufw &> /dev/null; then
+        REMAINING_RULES=$(ufw status numbered 2>/dev/null | grep -E "(1337|1338|9876|8765|7654|6543|1339|5432|4321|3210|2109|1098|9090)" | wc -l || echo "0")
+        if [[ $REMAINING_RULES -gt 0 ]]; then
+            warn "Found $REMAINING_RULES remaining firewall rules"
+        else
+            log "✅ All firewall rules removed"
+        fi
+    fi
+    
     log "Cleanup verification complete"
 }
 
@@ -468,13 +556,18 @@ print_summary() {
     echo
     echo -e "${GREEN}✅ Removed Components:${NC}"
     echo "  • OceanProxy application and services"
+    echo "  • All 12 proxy endpoints (usa, eu, alpha, beta, mobile, unlim, datacenter, gamma, delta, epsilon, zeta, eta)"
+    echo "  • Up to 24,000 proxy configurations (2000 per endpoint)"
     echo "  • User data and logs"
     echo "  • System services and timers"
-    echo "  • nginx configurations"
+    echo "  • nginx configurations and stream module settings"
     echo "  • SSL certificates"
-    echo "  • Firewall rules"
+    echo "  • Firewall rules for all proxy ports"
     echo "  • fail2ban configurations"
     echo "  • Cron jobs"
+    echo "  • 3proxy configurations and logs"
+    echo "  • Kernel optimizations"
+    echo "  • Port monitoring scripts"
     
     if [[ "$KEEP_DEPS" != "true" ]]; then
         echo "  • System dependencies"
@@ -497,12 +590,15 @@ print_summary() {
     fi
     echo "  • SSH access (always preserved)"
     echo "  • Basic system configuration"
+    echo "  • Backup files in /etc/*.backup (if any)"
     
     echo
     echo -e "${GREEN}🔄 Next Steps:${NC}"
     echo "  • Server is ready for fresh installation"
     echo "  • All OceanProxy data has been permanently deleted"
     echo "  • You can run the setup script again if needed"
+    echo "  • Check /etc/sysctl.conf.backup if you need to restore kernel settings"
+    echo "  • Check /etc/security/limits.conf.backup if you need to restore limits"
     
     echo
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -557,12 +653,14 @@ main() {
     stop_services
     remove_systemd_services
     remove_nginx_configs
+    remove_3proxy_configs
     remove_ssl_certificates
     remove_firewall_rules
     remove_fail2ban_config
     remove_cron_jobs
     remove_user_and_directories
     cleanup_git_credentials
+    cleanup_kernel_optimizations
     
     if [[ "$KEEP_DEPS" != "true" ]]; then
         remove_dependencies
