@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # 🌊 OceanProxy - Complete Server Setup Script
+# Updated with new port ranges and proxy endpoints
 # Save this as oceanproxy-setup.sh and run with: sudo ./oceanproxy-setup.sh
 
 set -euo pipefail
@@ -13,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-SCRIPT_VERSION="1.0.0"
+SCRIPT_VERSION="1.1.0"  # Updated version
 INSTALL_DIR="/opt/oceanproxy"
 LOG_DIR="/var/log/oceanproxy"
 CONFIG_DIR="/etc/oceanproxy"
@@ -52,6 +53,7 @@ banner() {
     ║            Whitelabel HTTP Proxy Service                  ║
     ║                                                           ║
     ║  Transform into a proxy reseller with your own brand!     ║
+    ║  Now with 12 proxy endpoints and 2000 ports per type!    ║
     ╚═══════════════════════════════════════════════════════════╝
 EOF
     echo -e "${NC}"
@@ -221,7 +223,8 @@ install_dependencies() {
             certbot \
             python3-certbot-nginx \
             build-essential \
-            supervisor
+            supervisor \
+            bc  # Added for port calculations
         
         # Install latest Go
         log "Installing Go 1.21..."
@@ -268,7 +271,8 @@ install_dependencies() {
             python3-certbot-nginx \
             gcc \
             make \
-            supervisor
+            supervisor \
+            bc  # Added for port calculations
         
         # Install latest Go
         log "Installing Go 1.21..."
@@ -298,7 +302,7 @@ install_dependencies() {
     
     # Verify installations
     log "Verifying installations..."
-    for cmd in nginx git jq curl; do
+    for cmd in nginx git jq curl bc; do
         if ! command -v $cmd &> /dev/null; then
             error "$cmd is not installed or not in PATH"
         fi
@@ -333,6 +337,7 @@ setup_user_and_directories() {
     mkdir -p "$INSTALL_DIR"/{app,data,logs,backups,scripts}
     mkdir -p "$LOG_DIR"/{nginx,3proxy}
     mkdir -p "$CONFIG_DIR"/{nginx,3proxy}
+    mkdir -p /etc/nginx/stream.d  # For dynamic stream configs
     
     # Set permissions
     chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
@@ -452,6 +457,9 @@ LOG_FILE=$LOG_DIR/api.log
 # Paths
 PROXY_LOG_FILE=$LOG_DIR/proxies.json
 SCRIPT_DIR=$INSTALL_DIR/app/backend/scripts
+
+# Port Limits (2000 ports per type)
+MAX_PORTS_PER_TYPE=2000
 EOF
     
     chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/app/backend/exec/.env"
@@ -461,7 +469,7 @@ EOF
 }
 
 configure_nginx() {
-    log "Configuring nginx..."
+    log "Configuring nginx with all 12 proxy endpoints..."
     
     # Stop nginx first
     systemctl stop nginx 2>/dev/null || true
@@ -470,6 +478,7 @@ configure_nginx() {
     rm -f /etc/nginx/conf.d/oceanproxy*.conf
     rm -f /etc/nginx/sites-available/oceanproxy
     rm -f /etc/nginx/sites-enabled/oceanproxy
+    rm -rf /etc/nginx/stream.d/*
     
     # Backup original configuration if it exists and we haven't backed it up yet
     if [[ -f /etc/nginx/nginx.conf && ! -f /etc/nginx/nginx.conf.backup ]]; then
@@ -484,7 +493,7 @@ configure_nginx() {
         fi
     fi
     
-    # Create a complete nginx.conf with stream module
+    # Create a complete nginx.conf with stream module and all proxy endpoints
     log "Creating complete nginx configuration with stream module..."
     cat > /etc/nginx/nginx.conf << 'EOF'
 user www-data;
@@ -493,7 +502,7 @@ pid /run/nginx.pid;
 include /etc/nginx/modules-enabled/*.conf;
 
 events {
-    worker_connections 768;
+    worker_connections 4096;
 }
 
 http {
@@ -525,7 +534,10 @@ stream {
                     '$session_time "$upstream_addr" '
                     '"$upstream_bytes_sent" "$upstream_bytes_received" "$upstream_connect_time"';
 
-    # USA Proxy Pool (Port 1337)
+    # Include dynamic configurations
+    include /etc/nginx/stream.d/*.conf;
+
+    # USA Proxy Pool (Port 1337) - Ports 10000-11999
     upstream usa_proxies {
         least_conn;
         server 127.0.0.1:10000 max_fails=3 fail_timeout=30s;
@@ -543,10 +555,10 @@ stream {
         error_log /var/log/oceanproxy/nginx/usa_error.log;
     }
 
-    # EU Proxy Pool (Port 1338)
+    # EU Proxy Pool (Port 1338) - Ports 12000-13999
     upstream eu_proxies {
         least_conn;
-        server 127.0.0.1:10001 max_fails=3 fail_timeout=30s;
+        server 127.0.0.1:12000 max_fails=3 fail_timeout=30s;
         # Additional servers will be added dynamically by scripts
     }
 
@@ -561,10 +573,10 @@ stream {
         error_log /var/log/oceanproxy/nginx/eu_error.log;
     }
 
-    # Alpha Proxy Pool (Port 9876)
+    # Alpha Proxy Pool (Port 9876) - Ports 14000-15999
     upstream alpha_proxies {
         least_conn;
-        server 127.0.0.1:10002 max_fails=3 fail_timeout=30s;
+        server 127.0.0.1:14000 max_fails=3 fail_timeout=30s;
         # Additional servers will be added dynamically by scripts
     }
 
@@ -577,6 +589,168 @@ stream {
         
         access_log /var/log/oceanproxy/nginx/alpha_access.log proxy;
         error_log /var/log/oceanproxy/nginx/alpha_error.log;
+    }
+
+    # Beta Proxy Pool (Port 8765) - Ports 16000-17999
+    upstream beta_proxies {
+        least_conn;
+        server 127.0.0.1:16000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 8765;
+        proxy_pass beta_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/beta_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/beta_error.log;
+    }
+
+    # Mobile Proxy Pool (Port 7654) - Ports 18000-19999
+    upstream mobile_proxies {
+        least_conn;
+        server 127.0.0.1:18000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 7654;
+        proxy_pass mobile_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/mobile_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/mobile_error.log;
+    }
+
+    # Unlim Proxy Pool (Port 6543) - Ports 20000-21999
+    upstream unlim_proxies {
+        least_conn;
+        server 127.0.0.1:20000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 6543;
+        proxy_pass unlim_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/unlim_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/unlim_error.log;
+    }
+
+    # Datacenter Proxy Pool (Port 1339) - Ports 22000-23999
+    upstream datacenter_proxies {
+        least_conn;
+        server 127.0.0.1:22000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 1339;
+        proxy_pass datacenter_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/datacenter_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/datacenter_error.log;
+    }
+
+    # Gamma Proxy Pool (Port 5432) - Ports 24000-25999 - NEW
+    upstream gamma_proxies {
+        least_conn;
+        server 127.0.0.1:24000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 5432;
+        proxy_pass gamma_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/gamma_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/gamma_error.log;
+    }
+
+    # Delta Proxy Pool (Port 4321) - Ports 26000-27999 - NEW
+    upstream delta_proxies {
+        least_conn;
+        server 127.0.0.1:26000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 4321;
+        proxy_pass delta_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/delta_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/delta_error.log;
+    }
+
+    # Epsilon Proxy Pool (Port 3210) - Ports 28000-29999 - NEW
+    upstream epsilon_proxies {
+        least_conn;
+        server 127.0.0.1:28000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 3210;
+        proxy_pass epsilon_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/epsilon_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/epsilon_error.log;
+    }
+
+    # Zeta Proxy Pool (Port 2109) - Ports 30000-31999 - NEW
+    upstream zeta_proxies {
+        least_conn;
+        server 127.0.0.1:30000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 2109;
+        proxy_pass zeta_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/zeta_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/zeta_error.log;
+    }
+
+    # Eta Proxy Pool (Port 1098) - Ports 32000-33999 - NEW
+    upstream eta_proxies {
+        least_conn;
+        server 127.0.0.1:32000 max_fails=3 fail_timeout=30s;
+        # Additional servers will be added dynamically by scripts
+    }
+
+    server {
+        listen 1098;
+        proxy_pass eta_proxies;
+        proxy_timeout 30s;
+        proxy_connect_timeout 5s;
+        proxy_responses 1;
+        
+        access_log /var/log/oceanproxy/nginx/eta_access.log proxy;
+        error_log /var/log/oceanproxy/nginx/eta_error.log;
     }
 }
 EOF
@@ -621,7 +795,7 @@ server {
     
     # Default location
     location / {
-        return 200 "OceanProxy Service Running";
+        return 200 "OceanProxy Service Running - 12 Proxy Endpoints Available";
         add_header Content-Type text/plain;
     }
     
@@ -644,7 +818,7 @@ EOF
         error "nginx configuration test failed"
     fi
     
-    log "nginx configured successfully"
+    log "nginx configured successfully with 12 proxy endpoints"
 }
 
 create_systemd_services() {
@@ -697,7 +871,7 @@ EOF
 }
 
 configure_firewall() {
-    log "Configuring firewall..."
+    log "Configuring firewall with all proxy ports..."
     
     if [[ "$OS_TYPE" == "debian" ]]; then
         # Configure UFW
@@ -712,10 +886,21 @@ configure_firewall() {
         ufw allow 80/tcp
         ufw allow 443/tcp
         
-        # Allow proxy ports
+        # Allow original proxy ports
         ufw allow 1337/tcp
         ufw allow 1338/tcp
         ufw allow 9876/tcp
+        ufw allow 8765/tcp
+        ufw allow 7654/tcp
+        ufw allow 6543/tcp
+        ufw allow 1339/tcp
+        
+        # Allow NEW proxy ports
+        ufw allow 5432/tcp
+        ufw allow 4321/tcp
+        ufw allow 3210/tcp
+        ufw allow 2109/tcp
+        ufw allow 1098/tcp
         
         # Allow API port (consider restricting in production)
         ufw allow $API_PORT/tcp
@@ -733,17 +918,30 @@ configure_firewall() {
         firewall-cmd --permanent --add-service=https
         firewall-cmd --permanent --add-service=ssh
         
-        # Allow proxy ports
+        # Allow original proxy ports
         firewall-cmd --permanent --add-port=1337/tcp
         firewall-cmd --permanent --add-port=1338/tcp
         firewall-cmd --permanent --add-port=9876/tcp
+        firewall-cmd --permanent --add-port=8765/tcp
+        firewall-cmd --permanent --add-port=7654/tcp
+        firewall-cmd --permanent --add-port=6543/tcp
+        firewall-cmd --permanent --add-port=1339/tcp
+        
+        # Allow NEW proxy ports
+        firewall-cmd --permanent --add-port=5432/tcp
+        firewall-cmd --permanent --add-port=4321/tcp
+        firewall-cmd --permanent --add-port=3210/tcp
+        firewall-cmd --permanent --add-port=2109/tcp
+        firewall-cmd --permanent --add-port=1098/tcp
+        
+        # Allow API port
         firewall-cmd --permanent --add-port=$API_PORT/tcp
         
         # Reload firewall
         firewall-cmd --reload
     fi
     
-    log "Firewall configured successfully"
+    log "Firewall configured successfully - 12 proxy ports open"
 }
 
 start_services() {
@@ -832,7 +1030,7 @@ setup_ssl() {
 }
 
 optimize_system() {
-    log "Optimizing system performance..."
+    log "Optimizing system performance for 12 proxy endpoints..."
     
     # Increase file descriptor limits
     cat >> /etc/security/limits.conf << EOF
@@ -934,6 +1132,37 @@ EOF
     chmod +x "$INSTALL_DIR/scripts/backup.sh"
     chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts/backup.sh"
     
+    # Create port usage monitoring script
+    cat > "$INSTALL_DIR/scripts/check_port_usage.sh" << 'EOF'
+#!/bin/bash
+echo "=== OceanProxy Port Usage Report ==="
+echo "Date: $(date)"
+echo ""
+
+declare -A PORT_RANGES
+PORT_RANGES["usa"]="10000-11999"
+PORT_RANGES["eu"]="12000-13999"
+PORT_RANGES["alpha"]="14000-15999"
+PORT_RANGES["beta"]="16000-17999"
+PORT_RANGES["mobile"]="18000-19999"
+PORT_RANGES["unlim"]="20000-21999"
+PORT_RANGES["datacenter"]="22000-23999"
+PORT_RANGES["gamma"]="24000-25999"
+PORT_RANGES["delta"]="26000-27999"
+PORT_RANGES["epsilon"]="28000-29999"
+PORT_RANGES["zeta"]="30000-31999"
+PORT_RANGES["eta"]="32000-33999"
+
+for subdomain in "${!PORT_RANGES[@]}"; do
+    count=$(jq --arg sub "$subdomain" '[.[] | select(.subdomain == $sub)] | length' /var/log/oceanproxy/proxies.json 2>/dev/null || echo 0)
+    percent=$((count * 100 / 2000))
+    echo "$subdomain: $count/2000 ($percent%)"
+done
+EOF
+
+    chmod +x "$INSTALL_DIR/scripts/check_port_usage.sh"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts/check_port_usage.sh"
+    
     # Add backup to crontab
     (crontab -u "$SERVICE_USER" -l 2>/dev/null; echo "0 3 * * * $INSTALL_DIR/scripts/backup.sh") | crontab -u "$SERVICE_USER" -
     
@@ -969,9 +1198,10 @@ test_installation() {
         fi
     done
     
-    # Test proxy ports
+    # Test all proxy ports
     log "Testing proxy port accessibility..."
-    for port in 1337 1338 9876; do
+    PROXY_PORTS="1337 1338 9876 8765 7654 6543 1339 5432 4321 3210 2109 1098"
+    for port in $PROXY_PORTS; do
         if netstat -tlnp | grep -q ":$port "; then
             log "✅ Port $port is listening"
         else
@@ -994,24 +1224,42 @@ print_summary() {
     echo "  • Service User: $SERVICE_USER"
     echo "  • Domain: $DOMAIN"
     echo "  • API Port: $API_PORT"
+    echo "  • Port Limit: 2000 ports per proxy type"
     echo
-    echo -e "${GREEN}🌐 Service Endpoints:${NC}"
+    echo -e "${GREEN}🌐 Service Endpoints (12 Total):${NC}"
     echo "  • API Health (HTTP): http://localhost:$API_PORT/health"
     echo "  • API Health (External): http://$DOMAIN/health"
     if [[ -d /etc/letsencrypt/live ]]; then
         echo "  • API Health (HTTPS): https://api.$DOMAIN/health"
         echo "  • Main Site (HTTPS): https://$DOMAIN"
     fi
-    echo "  • USA Proxy: usa.$DOMAIN:1337"
-    echo "  • EU Proxy: eu.$DOMAIN:1338" 
-    echo "  • Alpha Proxy: alpha.$DOMAIN:9876"
+    echo ""
+    echo "  Original Endpoints:"
+    echo "  • USA Proxy: usa.$DOMAIN:1337 (Ports 10000-11999)"
+    echo "  • EU Proxy: eu.$DOMAIN:1338 (Ports 12000-13999)"
+    echo "  • Alpha Proxy: alpha.$DOMAIN:9876 (Ports 14000-15999)"
+    echo "  • Beta Proxy: beta.$DOMAIN:8765 (Ports 16000-17999)"
+    echo "  • Mobile Proxy: mobile.$DOMAIN:7654 (Ports 18000-19999)"
+    echo "  • Unlim Proxy: unlim.$DOMAIN:6543 (Ports 20000-21999)"
+    echo "  • Datacenter Proxy: datacenter.$DOMAIN:1339 (Ports 22000-23999)"
+    echo ""
+    echo "  NEW Blank Endpoints:"
+    echo "  • Gamma Proxy: gamma.$DOMAIN:5432 (Ports 24000-25999)"
+    echo "  • Delta Proxy: delta.$DOMAIN:4321 (Ports 26000-27999)"
+    echo "  • Epsilon Proxy: epsilon.$DOMAIN:3210 (Ports 28000-29999)"
+    echo "  • Zeta Proxy: zeta.$DOMAIN:2109 (Ports 30000-31999)"
+    echo "  • Eta Proxy: eta.$DOMAIN:1098 (Ports 32000-33999)"
     echo
     echo -e "${GREEN}🔧 Management Commands:${NC}"
     echo "  • Check API status: sudo systemctl status oceanproxy-api"
     echo "  • View API logs: sudo tail -f $LOG_DIR/api.log"
+    echo "  • Check port usage: $INSTALL_DIR/scripts/check_port_usage.sh"
     echo "  • Create plan: curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN' \\"
     echo "                      -d 'reseller=residential&bandwidth=5&username=USER&password=PASS' \\"
     echo "                      http://localhost:$API_PORT/plan"
+    echo "  • Create blank proxy: curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN' \\"
+    echo "                             -d 'reseller=blank&subdomain=gamma&username=USER&password=PASS' \\"
+    echo "                             http://localhost:$API_PORT/plan"
     echo "  • Test SSL: curl https://api.$DOMAIN/health"
     echo
     echo -e "${GREEN}📁 Important Files:${NC}"
@@ -1019,6 +1267,7 @@ print_summary() {
     echo "  • Proxy Database: $LOG_DIR/proxies.json"
     echo "  • nginx Config: /etc/nginx/nginx.conf"
     echo "  • Scripts: $INSTALL_DIR/app/backend/scripts/"
+    echo "  • Port Usage Script: $INSTALL_DIR/scripts/check_port_usage.sh"
     echo "  • SSL Certificates: /etc/letsencrypt/live/ (if configured)"
     echo
     echo -e "${GREEN}🔐 SSL Status:${NC}"
@@ -1032,42 +1281,33 @@ print_summary() {
     fi
     echo
     echo -e "${GREEN}📈 Next Steps:${NC}"
-    echo "  1. Verify DNS records point to this server IP: $(curl -s ifconfig.me || echo 'unknown')"
-    echo "  2. Test SSL setup: curl https://api.$DOMAIN/health"
-    echo "  3. Create test proxy: curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN' \\"
-    echo "                             -d 'reseller=residential&bandwidth=1&username=test&password=test123' \\"
-    echo "                             http://localhost:$API_PORT/plan"
-    echo "  4. Build customer dashboard frontend"
-    echo "  5. Integrate payment processing"
-    echo "  6. Set up monitoring and alerting"
+    echo "  1. Verify DNS records for all 12 subdomains point to this server IP: $(curl -s ifconfig.me || echo 'unknown')"
+    echo "  2. Update your scripts to use the new port ranges (2000 ports per type)"
+    echo "  3. Test the new endpoints (gamma, delta, epsilon, zeta, eta)"
+    echo "  4. Monitor port usage with: $INSTALL_DIR/scripts/check_port_usage.sh"
+    echo "  5. Create test proxies on the new endpoints"
+    echo "  6. Set up alerts when any proxy type reaches 80% capacity (1600/2000 ports)"
     echo
     echo -e "${YELLOW}⚠️  Important Notes:${NC}"
-    echo "  • Keep your API keys secure and rotate them regularly"
-    echo "  • Monitor log files for any issues: sudo tail -f $LOG_DIR/api.log"
-    echo "  • SSL certificates auto-renew via certbot.timer"
-    echo "  • Backup script runs daily at 3 AM: $INSTALL_DIR/scripts/backup.sh"
-    echo "  • System optimizations applied for high performance"
-    echo "  • Firewall configured - ensure DNS points to: $(curl -s ifconfig.me || echo 'unknown')"
+    echo "  • Each proxy type is now limited to 2000 ports maximum"
+    echo "  • New endpoints (gamma, delta, epsilon, zeta, eta) are configured as blank types"
+    echo "  • Monitor port usage regularly to avoid exhaustion"
+    echo "  • DNS records needed for: usa, eu, alpha, beta, mobile, unlim, datacenter, gamma, delta, epsilon, zeta, eta"
+    echo "  • All 12 endpoints are configured and ready for use"
     echo
-    echo -e "${GREEN}🔧 SSL Setup Commands (if needed):${NC}"
-    echo "  • Manual SSL setup: sudo certbot --nginx -d api.$DOMAIN"
-    echo "  • Check certificates: sudo certbot certificates"
-    echo "  • Test renewal: sudo certbot renew --dry-run"
-    echo "  • View SSL logs: sudo tail -f /var/log/letsencrypt/letsencrypt.log"
-    echo
-    echo -e "${GREEN}🚨 Troubleshooting Commands:${NC}"
-    echo "  • Check services: sudo systemctl status nginx oceanproxy-api"
-    echo "  • Test API manually: curl http://localhost:$API_PORT/health"
-    echo "  • Check ports: sudo netstat -tlnp | grep -E ':(80|443|1337|1338|9876|$API_PORT)'"
-    echo "  • View nginx logs: sudo tail -f /var/log/nginx/error.log"
-    echo "  • Restart services: sudo systemctl restart nginx oceanproxy-api"
+    echo -e "${GREEN}🔧 Port Range Reference:${NC}"
+    echo "  • usa: 10000-11999    • eu: 12000-13999     • alpha: 14000-15999"
+    echo "  • beta: 16000-17999   • mobile: 18000-19999 • unlim: 20000-21999"
+    echo "  • datacenter: 22000-23999"
+    echo "  • gamma: 24000-25999  • delta: 26000-27999  • epsilon: 28000-29999"
+    echo "  • zeta: 30000-31999   • eta: 32000-33999"
     echo
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo
     if [[ -d /etc/letsencrypt/live ]]; then
-        log "Your OceanProxy whitelabel service is ready with SSL! 🌊🔐💰"
+        log "Your OceanProxy whitelabel service is ready with SSL and 12 proxy endpoints! 🌊🔐💰"
     else
-        log "Your OceanProxy whitelabel service is ready! Configure SSL for production use. 🌊💰"
+        log "Your OceanProxy whitelabel service is ready with 12 proxy endpoints! Configure SSL for production use. 🌊💰"
     fi
     echo
 }
