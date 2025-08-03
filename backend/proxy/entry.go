@@ -22,20 +22,15 @@ type Entry struct {
 }
 
 func NewEntry(planID, user, pass, upstreamHost string, publicPort int, subdomain string, authPort int, expires int64) Entry {
-	// Assign local ports based on subdomain (matching script port ranges)
+	// Assign local ports based on subdomain
 	localPortMap := map[string]int{
-		"usa":        10000, // Range: 10000-11999
-		"eu":         12000, // Range: 12000-13999
-		"alpha":      14000, // Range: 14000-15999
-		"beta":       16000, // Range: 16000-17999
-		"mobile":     18000, // Range: 18000-19999
-		"unlim":      20000, // Range: 20000-21999
-		"datacenter": 22000, // Range: 22000-23999
-		"gamma":      24000, // Range: 24000-25999
-		"delta":      26000, // Range: 26000-27999
-		"epsilon":    28000, // Range: 28000-29999
-		"zeta":       30000, // Range: 30000-31999
-		"eta":        32000, // Range: 32000-33999
+		"usa":        10000,
+		"eu":         20000,
+		"alpha":      30000,
+		"beta":       40000,
+		"mobile":     50000,
+		"unlim":      60000,
+		"datacenter": 70000,
 	}
 
 	basePort := localPortMap[subdomain]
