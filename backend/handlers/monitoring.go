@@ -80,6 +80,21 @@ type MonitoringData struct {
 
 // MonitoringAPIHandler returns JSON monitoring data
 func MonitoringAPIHandler(w http.ResponseWriter, r *http.Request) {
+	// Check for bearer token in query parameter for web access
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		// Check Authorization header
+		authHeader := r.Header.Get("Authorization")
+		if authHeader != "" {
+			token = strings.TrimPrefix(authHeader, "Bearer ")
+		}
+	}
+
+	if token != config.BearerToken {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	data := collectMonitoringData()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)

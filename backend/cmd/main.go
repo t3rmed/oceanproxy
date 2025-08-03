@@ -42,6 +42,10 @@ func main() {
 		r.Post("/restore", handlers.RestoreHandler)
 	})
 
+	// Monitoring routes (with bearer token authentication)
+	r.Get("/monitoring", handlers.MonitoringPanelHandler)
+	r.Get("/monitoring/api", handlers.MonitoringAPIHandler)
+
 	log.Println("🌐 Listening on http://0.0.0.0:9090")
 	log.Fatal(http.ListenAndServe(":9090", r))
 }
