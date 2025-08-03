@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -21,26 +22,26 @@ import (
 var startTime = time.Now()
 
 type SystemStats struct {
-	CPUCores       int     `json:"cpu_cores"`
-	CPUUsage       float64 `json:"cpu_usage"`
-	MemoryTotal    uint64  `json:"memory_total"`
-	MemoryUsed     uint64  `json:"memory_used"`
-	MemoryPercent  float64 `json:"memory_percent"`
-	DiskTotal      uint64  `json:"disk_total"`
-	DiskUsed       uint64  `json:"disk_used"`
-	DiskPercent    float64 `json:"disk_percent"`
-	LoadAverage    string  `json:"load_average"`
-	Uptime         string  `json:"uptime"`
-	UptimeSeconds  int64   `json:"uptime_seconds"`
+	CPUCores      int     `json:"cpu_cores"`
+	CPUUsage      float64 `json:"cpu_usage"`
+	MemoryTotal   uint64  `json:"memory_total"`
+	MemoryUsed    uint64  `json:"memory_used"`
+	MemoryPercent float64 `json:"memory_percent"`
+	DiskTotal     uint64  `json:"disk_total"`
+	DiskUsed      uint64  `json:"disk_used"`
+	DiskPercent   float64 `json:"disk_percent"`
+	LoadAverage   string  `json:"load_average"`
+	Uptime        string  `json:"uptime"`
+	UptimeSeconds int64   `json:"uptime_seconds"`
 }
 
 type ProxyStats struct {
-	TotalPlans      int                       `json:"total_plans"`
-	ActiveProxies   int                       `json:"active_proxies"`
-	ExpiredProxies  int                       `json:"expired_proxies"`
-	ProxiesByType   map[string]int            `json:"proxies_by_type"`
-	PortUsage       map[string]PortUsageInfo  `json:"port_usage"`
-	RecentProxies   []proxy.Entry             `json:"recent_proxies"`
+	TotalPlans     int                      `json:"total_plans"`
+	ActiveProxies  int                      `json:"active_proxies"`
+	ExpiredProxies int                      `json:"expired_proxies"`
+	ProxiesByType  map[string]int           `json:"proxies_by_type"`
+	PortUsage      map[string]PortUsageInfo `json:"port_usage"`
+	RecentProxies  []proxy.Entry            `json:"recent_proxies"`
 }
 
 type PortUsageInfo struct {
@@ -57,9 +58,9 @@ type NetworkStats struct {
 }
 
 type PortInfo struct {
-	Port     int    `json:"port"`
-	Service  string `json:"service"`
-	Status   string `json:"status"`
+	Port    int    `json:"port"`
+	Service string `json:"service"`
+	Status  string `json:"status"`
 }
 
 type DomainStatus struct {
@@ -71,10 +72,10 @@ type DomainStatus struct {
 }
 
 type MonitoringData struct {
-	System      SystemStats   `json:"system"`
-	Proxies     ProxyStats    `json:"proxies"`
-	Network     NetworkStats  `json:"network"`
-	LastUpdated time.Time     `json:"last_updated"`
+	System      SystemStats  `json:"system"`
+	Proxies     ProxyStats   `json:"proxies"`
+	Network     NetworkStats `json:"network"`
+	LastUpdated time.Time    `json:"last_updated"`
 }
 
 // MonitoringAPIHandler returns JSON monitoring data
@@ -95,7 +96,7 @@ func MonitoringPanelHandler(w http.ResponseWriter, r *http.Request) {
 			token = strings.TrimPrefix(authHeader, "Bearer ")
 		}
 	}
-	
+
 	if token != config.BearerToken {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -104,8 +105,8 @@ func MonitoringPanelHandler(w http.ResponseWriter, r *http.Request) {
 	// Serve the monitoring HTML
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	monitoringHTML.Execute(w, map[string]interface{}{
-		"Token": token,
-		"Domain": config.BaseDomain,
+		"Token":   token,
+		"Domain":  config.BaseDomain,
 		"ApiPort": os.Getenv("PORT"),
 	})
 }
@@ -273,7 +274,7 @@ func getNetworkStats() NetworkStats {
 	// Get server IP
 	if resp, err := http.Get("https://api.ipify.org"); err == nil {
 		defer resp.Body.Close()
-		if body, err := os.ReadFile(resp.Body); err == nil {
+		if body, err := io.ReadAll(resp.Body); err == nil {
 			stats.ServerIP = string(body)
 		}
 	}
@@ -309,9 +310,9 @@ func getNetworkStats() NetworkStats {
 	}
 
 	// Check subdomain status
-	subdomains := []string{"usa", "eu", "alpha", "beta", "mobile", "unlim", "datacenter", 
+	subdomains := []string{"usa", "eu", "alpha", "beta", "mobile", "unlim", "datacenter",
 		"gamma", "delta", "epsilon", "zeta", "eta", "api"}
-	
+
 	for _, subdomain := range subdomains {
 		port := 80 // default
 		if p, exists := reversePortMap()[subdomain]; exists {
@@ -900,13 +901,15 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                         Port Usage by Type (2000 ports per type)
                     </h2>
                     <div class="port-grid">
-                        ${Object.entries(data.proxies.port_usage).map(([type, usage]) => `
+                        ${Object.entries(data.proxies.port_usage).map(([type, usage]) => ` + "`" + `
                             <div class="port-item ${usage.percentage > 0 ? 'active' : ''}">
                                 <div class="port-name">${type}</div>
-                                <div class="port-percent ${getStatusClass(usage.percentage)}">${usage.percentage.toFixed(1)}%</div>
+                                <div class="port-percent ${getStatusClass(usage.percentage)}">
+                                    ${usage.percentage.toFixed(1)}%
+                                </div>
                                 <div class="port-usage">${usage.used}/${usage.total}</div>
                             </div>
-                        `).join('')}
+                        ` + "`" + `).join('')}
                     </div>
                 </div>
 
@@ -918,7 +921,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                             Domain Status
                         </h2>
                         <div class="domain-grid">
-                            ${Object.entries(data.network.subdomain_status).map(([subdomain, status]) => `
+                            ${Object.entries(data.network.subdomain_status).map(([subdomain, status]) => ` + "`" + `
                                 <div class="domain-item">
                                     <div class="domain-name">${status.subdomain}.{{.Domain}}</div>
                                     <div class="status-badge ${status.resolves ? 'success' : 'danger'}">
@@ -928,7 +931,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                                         Port ${status.port} ${status.is_listening ? 'Open' : 'Closed'}
                                     </div>
                                 </div>
-                            `).join('')}
+                            ` + "`" + `).join('')}
                         </div>
                     </div>
 
@@ -938,7 +941,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                             Open Ports
                         </h2>
                         <div class="domain-grid">
-                            ${data.network.open_ports.map(port => `
+                            ${data.network.open_ports.map(port => ` + "`" + `
                                 <div class="domain-item">
                                     <div class="domain-name">Port ${port.port} (${port.service})</div>
                                     <div></div>
@@ -946,7 +949,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                                         ${port.status}
                                     </div>
                                 </div>
-                            `).join('')}
+                            ` + "`" + `).join('')}
                         </div>
                     </div>
                 </div>
@@ -959,7 +962,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                     </h2>
                     <div class="proxy-list">
                         ${data.proxies.recent_proxies && data.proxies.recent_proxies.length > 0 ? 
-                            data.proxies.recent_proxies.reverse().map(proxy => `
+                            data.proxies.recent_proxies.reverse().map(proxy => ` + "`" + `
                                 <div class="proxy-item">
                                     <div class="proxy-info">
                                         <div class="proxy-username">${proxy.username}</div>
@@ -973,7 +976,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                                         ${proxy.expires_at === 0 ? 'No Expiry' : (proxy.expires_at > Date.now()/1000 ? 'Active' : 'Expired')}
                                     </div>
                                 </div>
-                            `).join('') : 
+                            ` + "`" + `).join('') : 
                             '<p style="text-align: center; color: #8892b0;">No proxies created yet</p>'
                         }
                     </div>
