@@ -14,7 +14,7 @@ func KillPort(port int) error {
 }
 
 func Spawn3proxy(e Entry) error {
-	script := "/root/oceanproxy-api/backend/scripts/create_proxy_plan.sh"
+	script := "../scripts/create_proxy_plan.sh"
 
 	// sanity check: does the script exist?
 	if _, err := os.Stat(script); os.IsNotExist(err) {
