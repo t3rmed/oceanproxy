@@ -828,6 +828,8 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
             return 'danger';
         }
 
+        const baseDomain = '{{.Domain}}';
+        
         function updateDashboard(data) {
             const html = ` + "`" + `
                 <!-- System Stats -->
@@ -944,7 +946,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                         <div class="domain-grid">
                             ${Object.entries(data.network.subdomain_status).map(([subdomain, status]) => ` + "`" + `
                                 <div class="domain-item">
-                                    <div class="domain-name">${status.subdomain}.{{.Domain}}</div>
+                                    <div class="domain-name">${status.subdomain}.${baseDomain}</div>
                                     <div class="status-badge ${status.resolves ? 'success' : 'danger'}">
                                         ${status.resolves ? 'Resolves' : 'No DNS'}
                                     </div>
@@ -988,7 +990,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
                                     <div class="proxy-info">
                                         <div class="proxy-username">${proxy.username}</div>
                                         <div class="proxy-details">
-                                            ${proxy.subdomain}.{{.Domain}}:${proxy.public_port || reversePortMap[proxy.subdomain] || 'N/A'} • 
+                                            ${proxy.subdomain}.${baseDomain}:${proxy.public_port || reversePortMap[proxy.subdomain] || 'N/A'} • 
                                             Local: ${proxy.local_port} • 
                                             Created: ${formatTimestamp(proxy.created_at * 1000 || Date.now())}
                                         </div>
