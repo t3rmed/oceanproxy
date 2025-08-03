@@ -119,11 +119,17 @@ func MonitoringPanelHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Serve the monitoring HTML
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	monitoringHTML.Execute(w, map[string]interface{}{
+
+	templateData := map[string]interface{}{
 		"Token":   token,
 		"Domain":  config.BaseDomain,
 		"ApiPort": os.Getenv("PORT"),
-	})
+	}
+
+	if err := monitoringHTML.Execute(w, templateData); err != nil {
+		http.Error(w, fmt.Sprintf("Template execution error: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
 
 func collectMonitoringData() MonitoringData {
