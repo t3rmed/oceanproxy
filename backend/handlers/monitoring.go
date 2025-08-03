@@ -789,7 +789,7 @@ var monitoringHTML = template.Must(template.New("monitoring").Parse(`
 
     <script>
         const token = '{{.Token}}';
-        const apiUrl = '/monitoring/api';
+        const apiUrl = '/api/monitoring/api';
 
         async function fetchData() {
             try {
