@@ -26,10 +26,10 @@ if [ $# -lt 7 ]; then
     exit 1
 fi
 
-CONFIG_DIR="/etc/3proxy/plans"
+CONFIG_DIR="/opt/oceanproxy/app/backend/config/3proxy/plans"
 CONFIG_FILE="${CONFIG_DIR}/${PLAN_ID}_${SUBDOMAIN}.cfg"
-PROXY_LOG="/var/log/oceanproxy/proxies.json"
-STREAM_CONFIG="/etc/nginx/stream.d"
+PROXY_LOG="/opt/oceanproxy/app/backend/logs/proxies.json"
+STREAM_CONFIG="/opt/oceanproxy/app/backend/config/nginx/stream.d"
 
 # Port ranges (2000 ports each)
 declare -A PORT_RANGES
@@ -81,7 +81,7 @@ PLAN_TYPE=${PLAN_TYPES[$SUBDOMAIN]}
 PORT_RANGE=${PORT_RANGES[$SUBDOMAIN]}
 
 mkdir -p "$CONFIG_DIR"
-mkdir -p "/var/log/oceanproxy"
+mkdir -p "/opt/oceanproxy/app/backend/logs"
 mkdir -p "$STREAM_CONFIG"
 
 echo "🔧 Creating whitelabel HTTP proxy plan: $PLAN_ID [$SUBDOMAIN]"
@@ -185,7 +185,7 @@ fi
 
 # === Launch 3proxy with the new config ===
 echo "🚀 Starting 3proxy on port $LOCAL_PORT for user $USERNAME"
-nohup /usr/bin/3proxy "$CONFIG_FILE" > "/var/log/3proxy_${PLAN_ID}_${SUBDOMAIN}.log" 2>&1 &
+nohup /usr/bin/3proxy "$CONFIG_FILE" > "/opt/oceanproxy/app/backend/logs/3proxy_${PLAN_ID}_${SUBDOMAIN}.log" 2>&1 &
 PROXY_PID=$!
 
 # === Verify startup ===
@@ -194,7 +194,7 @@ sleep 2
 # Check if process is still running
 if ! kill -0 "$PROXY_PID" 2>/dev/null; then
     echo "❌ 3proxy process failed to start"
-    echo "📋 Check log: /var/log/3proxy_${PLAN_ID}_${SUBDOMAIN}.log"
+    echo "📋 Check log: /opt/oceanproxy/app/backend/logs/3proxy_${PLAN_ID}_${SUBDOMAIN}.log"
     echo "📋 Config file: $CONFIG_FILE"
     exit 1
 fi
@@ -203,7 +203,7 @@ fi
 if ! netstat -tlnp 2>/dev/null | grep -q ":$LOCAL_PORT "; then
     echo "❌ 3proxy is not listening on port $LOCAL_PORT"
     kill -9 "$PROXY_PID" 2>/dev/null
-    echo "📋 Check log: /var/log/3proxy_${PLAN_ID}_${SUBDOMAIN}.log"
+    echo "📋 Check log: /opt/oceanproxy/app/backend/logs/3proxy_${PLAN_ID}_${SUBDOMAIN}.log"
     echo "📋 Config file: $CONFIG_FILE"
     exit 1
 fi
@@ -264,7 +264,7 @@ server {
     proxy_timeout 15s;
     proxy_responses 1;
     proxy_connect_timeout 10s;
-    error_log /var/log/nginx/${SUBDOMAIN}_proxy_error.log;
+    error_log /opt/oceanproxy/app/backend/logs/nginx_${SUBDOMAIN}_proxy_error.log;
 }
 EOF
 else
