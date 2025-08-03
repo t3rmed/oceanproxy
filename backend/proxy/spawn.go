@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 )
 
@@ -14,9 +15,18 @@ func KillPort(port int) error {
 }
 
 func Spawn3proxy(e Entry) error {
-	script := "../scripts/create_proxy_plan.sh"
+	// Get the executable path and construct script path relative to it
+	execPath, err := os.Executable()
+	if err != nil {
+		log.Printf("❌ Failed to get executable path: %v", err)
+		return fmt.Errorf("failed to get executable path: %v", err)
+	}
 
-	// sanity check: does the script exist?
+	// Get the directory containing the executable
+	execDir := filepath.Dir(execPath)
+
+	// Go up one level from exec directory to backend directory, then into scripts
+	script := filepath.Join(filepath.Dir(execDir), "scripts", "create_proxy_plan.sh") // sanity check: does the script exist?
 	if _, err := os.Stat(script); os.IsNotExist(err) {
 		log.Printf("❌ Spawn failed: script not found at %s", script)
 		return fmt.Errorf("script not found: %s", script)
