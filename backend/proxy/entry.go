@@ -22,25 +22,28 @@ type Entry struct {
 }
 
 func NewEntry(planID, user, pass, upstreamHost string, publicPort int, subdomain string, authPort int, expires int64) Entry {
-	// Assign local ports based on subdomain (matching script port ranges)
-	localPortMap := map[string]int{
-		"usa":        10000, // Range: 10000-11999
-		"eu":         12000, // Range: 12000-13999
-		"alpha":      14000, // Range: 14000-15999
-		"beta":       16000, // Range: 16000-17999
-		"mobile":     18000, // Range: 18000-19999
-		"unlim":      20000, // Range: 20000-21999
-		"datacenter": 22000, // Range: 22000-23999
-		"gamma":      24000, // Range: 24000-25999
-		"delta":      26000, // Range: 26000-27999
-		"epsilon":    28000, // Range: 28000-29999
-		"zeta":       30000, // Range: 30000-31999
-		"eta":        32000, // Range: 32000-33999
-	}
-
-	basePort := localPortMap[subdomain]
-	if basePort == 0 {
-		basePort = 10000 // fallback
+	// Get next available port for this subdomain
+	localPort, err := GetNextAvailablePort(subdomain)
+	if err != nil {
+		// Fallback to base port if port manager fails
+		localPortMap := map[string]int{
+			"usa":        10000,
+			"eu":         12000,
+			"alpha":      14000,
+			"beta":       16000,
+			"mobile":     18000,
+			"unlim":      20000,
+			"datacenter": 22000,
+			"gamma":      24000,
+			"delta":      26000,
+			"epsilon":    28000,
+			"zeta":       30000,
+			"eta":        32000,
+		}
+		localPort = localPortMap[subdomain]
+		if localPort == 0 {
+			localPort = 10000 // ultimate fallback
+		}
 	}
 
 	return Entry{
@@ -50,7 +53,7 @@ func NewEntry(planID, user, pass, upstreamHost string, publicPort int, subdomain
 		AuthHost:   upstreamHost,
 		LocalHost:  fmt.Sprintf("%s.%s", subdomain, config.BaseDomain),
 		AuthPort:   authPort,
-		LocalPort:  basePort,
+		LocalPort:  localPort,
 		PublicPort: publicPort,
 		Subdomain:  subdomain,
 		ExpiresAt:  expires,

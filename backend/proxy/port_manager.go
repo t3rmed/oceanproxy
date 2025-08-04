@@ -1,14 +1,11 @@
-// proxy/port_manager.go
 package proxy
 
 import (
 	"encoding/json"
 	"fmt"
-	"oceanproxy-api/config"
 	"os"
 	"os/exec"
 	"sync"
-	"time"
 )
 
 var (
@@ -124,27 +121,4 @@ func GetPortUsage() map[string]struct{ used, total int } {
 	}
 
 	return usage
-}
-
-// Updated NewEntry function with port allocation
-func NewEntryWithPort(planID, user, pass, upstreamHost string, publicPort int, subdomain string, authPort int, expires int64) (Entry, error) {
-	// Get next available port
-	localPort, err := GetNextAvailablePort(subdomain)
-	if err != nil {
-		return Entry{}, err
-	}
-
-	return Entry{
-		PlanID:     planID,
-		Username:   user,
-		Password:   pass,
-		AuthHost:   upstreamHost,
-		LocalHost:  fmt.Sprintf("%s.%s", subdomain, config.BaseDomain),
-		AuthPort:   authPort,
-		LocalPort:  localPort,
-		PublicPort: publicPort,
-		Subdomain:  subdomain,
-		ExpiresAt:  expires,
-		CreatedAt:  time.Now().Unix(),
-	}, nil
 }
