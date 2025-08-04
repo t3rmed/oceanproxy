@@ -3,9 +3,11 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"time"
 
 	"oceanproxy-api/proxy"
@@ -99,6 +101,15 @@ func RestoreHandler(w http.ResponseWriter, r *http.Request) {
 	if len(newEntries) > 0 {
 		entries = append(entries, newEntries...)
 		_ = proxy.SaveProxyLog(entries)
+	}
+
+	// Update nginx upstreams after restore
+	if len(restored) > 0 {
+		if err := exec.Command("/opt/oceanproxy/scripts/update_nginx_upstreams.sh").Run(); err != nil {
+			log.Printf("⚠️ Warning: Failed to update nginx upstreams after restore: %v", err)
+		} else {
+			log.Printf("✅ nginx upstreams updated successfully after restore")
+		}
 	}
 
 	JSON(w, map[string]interface{}{

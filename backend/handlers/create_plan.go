@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"os/exec"
 
 	"oceanproxy-api/providers"
 	"oceanproxy-api/proxy"
@@ -28,7 +30,16 @@ func CreateNettifyPlanHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = proxy.LogProxy(p)
-		proxies = append(proxies, fmt.Sprintf("http://%s:%s@%s:%d", p.Username, p.Password, p.LocalHost, p.LocalPort))
+
+		// Update nginx upstreams after proxy is created and logged
+		if err := exec.Command("/opt/oceanproxy/scripts/update_nginx_upstreams.sh").Run(); err != nil {
+			log.Printf("⚠️ Warning: Failed to update nginx upstreams: %v", err)
+		} else {
+			log.Printf("✅ nginx upstreams updated successfully")
+		}
+
+		// Return the PUBLIC port, not the local port
+		proxies = append(proxies, fmt.Sprintf("http://%s:%s@%s:%d", p.Username, p.Password, p.LocalHost, p.PublicPort))
 	}
 
 	JSON(w, map[string]interface{}{
@@ -61,7 +72,16 @@ func CreatePlanHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = proxy.LogProxy(p)
-		proxies = append(proxies, fmt.Sprintf("http://%s:%s@%s:%d", p.Username, p.Password, p.LocalHost, p.LocalPort))
+
+		// Update nginx upstreams after proxy is created and logged
+		if err := exec.Command("/opt/oceanproxy/scripts/update_nginx_upstreams.sh").Run(); err != nil {
+			log.Printf("⚠️ Warning: Failed to update nginx upstreams: %v", err)
+		} else {
+			log.Printf("✅ nginx upstreams updated successfully")
+		}
+
+		// Return the PUBLIC port, not the local port
+		proxies = append(proxies, fmt.Sprintf("http://%s:%s@%s:%d", p.Username, p.Password, p.LocalHost, p.PublicPort))
 	}
 
 	JSON(w, map[string]interface{}{

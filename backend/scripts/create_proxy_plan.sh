@@ -1,6 +1,5 @@
 #!/bin/bash
-# create_proxy_plan.sh - Create individual HTTP proxy plan with instant nginx integration
-# Updated with correct paths and permissions
+# create_proxy_plan.sh - Create individual HTTP proxy plan with nginx integration
 
 # === Args ===
 PLAN_ID="$1"
@@ -21,7 +20,6 @@ fi
 CONFIG_DIR="/etc/3proxy/plans"
 CONFIG_FILE="${CONFIG_DIR}/${PLAN_ID}_${SUBDOMAIN}.cfg"
 PROXY_LOG="/var/log/oceanproxy/proxies.json"
-STREAM_CONFIG="/etc/nginx/stream.d"
 
 # Port ranges (2000 ports each)
 declare -A PORT_RANGES
@@ -59,7 +57,6 @@ PORT_RANGE=${PORT_RANGES[$SUBDOMAIN]}
 # Create directories if they don't exist
 mkdir -p "$CONFIG_DIR"
 mkdir -p "/var/log/oceanproxy"
-mkdir -p "$STREAM_CONFIG"
 
 echo "🔧 Creating whitelabel HTTP proxy plan: $PLAN_ID [$SUBDOMAIN]"
 echo "   👤 Username: $USERNAME"
@@ -193,35 +190,5 @@ if ! netstat -tlnp 2>/dev/null | grep -q ":$LOCAL_PORT "; then
 fi
 
 echo "✅ 3proxy started successfully (PID: $PROXY_PID)"
-
-# === Add/Update entry in proxy log ===
-echo "📝 Updating proxy log..."
-
-# Create proxy log entry
-PROXY_ENTRY=$(cat << EOF
-{
-  "plan_id": "$PLAN_ID",
-  "username": "$USERNAME",
-  "password": "$PASSWORD",
-  "auth_host": "$UPSTREAM_HOST",
-  "auth_port": $UPSTREAM_PORT,
-  "subdomain": "$SUBDOMAIN",
-  "local_port": $LOCAL_PORT,
-  "public_port": $PUBLIC_PORT,
-  "created_at": "$(date -Iseconds)",
-  "status": "active"
-}
-EOF
-)
-
-# Initialize proxy log if it doesn't exist
-if [ ! -f "$PROXY_LOG" ]; then
-    echo "[]" > "$PROXY_LOG"
-fi
-
-# Remove existing entry for this plan_id and add new one
-jq --argjson new_entry "$PROXY_ENTRY" \
-   'map(select(.plan_id != $new_entry.plan_id)) + [$new_entry]' \
-   "$PROXY_LOG" > /tmp/updated_proxies.json && mv /tmp/updated_proxies.json "$PROXY_LOG"
-
 echo "✅ Proxy plan $PLAN_ID is live and ready for clients!"
+echo "🌐 Client connects to: ${SUBDOMAIN}.oceanproxy.io:${PUBLIC_PORT} with credentials ${USERNAME}:${PASSWORD}"

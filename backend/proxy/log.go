@@ -5,7 +5,7 @@ import (
 	"os"
 )
 
-const LogPath = "/opt/oceanproxy/app/backend/logs/proxies.json"
+const LogPath = "/var/log/oceanproxy/proxies.json"
 
 func LogProxy(e Entry) error {
 	var entries []Entry
@@ -21,6 +21,6 @@ func SaveProxyLog(entries []Entry) error {
 	if err != nil {
 		return err
 	}
-	_ = os.MkdirAll("/opt/oceanproxy/app/backend/logs", 0755)
+	_ = os.MkdirAll("/var/log/oceanproxy", 0755)
 	return os.WriteFile(LogPath, data, 0644)
 }
