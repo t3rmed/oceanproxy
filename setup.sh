@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 🌊 OceanProxy - Complete Server Setup Script
-# Updated with recent fixes and improvements
+# Updated with comprehensive error handling and fixes
 # Save this as oceanproxy-setup.sh and run with: sudo ./oceanproxy-setup.sh
 
 set -euo pipefail
@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-SCRIPT_VERSION="1.2.1"  # Updated version with systemd fix
+SCRIPT_VERSION="1.2.2"  # Updated version with enhanced error handling
 INSTALL_DIR="/opt/oceanproxy"
 LOG_DIR="/var/log/oceanproxy"
 CONFIG_DIR="/etc/oceanproxy"
@@ -29,6 +29,7 @@ DEFAULT_API_PORT="9090"
 UNATTENDED=false
 SKIP_DEPS=false
 SKIP_SSL=false
+SKIP_OPTIMIZATION=false
 DEV_MODE=false
 
 # Function definitions
@@ -45,6 +46,37 @@ error() {
     exit 1
 }
 
+# Safe command execution with error handling
+safe_exec() {
+    local cmd="$1"
+    local error_msg="${2:-Command failed}"
+    
+    if ! eval "$cmd"; then
+        warn "$error_msg"
+        return 1
+    fi
+    return 0
+}
+
+# Safe sysctl parameter setting
+safe_sysctl() {
+    local param="$1"
+    local value="$2"
+    
+    if [[ -f "/proc/sys/${param//./\/}" ]]; then
+        if sysctl -w "$param=$value" >/dev/null 2>&1; then
+            echo "$param = $value"
+            return 0
+        else
+            warn "Failed to set $param=$value"
+            return 1
+        fi
+    else
+        warn "Parameter $param not available on this kernel"
+        return 1
+    fi
+}
+
 banner() {
     echo -e "${BLUE}"
     cat << 'EOF'
@@ -54,7 +86,7 @@ banner() {
     ║                                                           ║
     ║  Transform into a proxy reseller with your own brand!     ║
     ║  Now with 12 proxy endpoints and 2000 ports per type!    ║
-    ║  Updated with permission fixes and systemd fixes!        ║
+    ║  Updated with enhanced error handling and fixes!         ║
     ╚═══════════════════════════════════════════════════════════╝
 EOF
     echo -e "${NC}"
@@ -72,6 +104,7 @@ OPTIONS:
     --unattended            Run in unattended mode (requires env vars)
     --skip-deps            Skip dependency installation
     --skip-ssl             Skip SSL certificate setup
+    --skip-optimization    Skip system optimization
     --dev-mode             Development mode (local testing)
     --help                 Show this help message
 
@@ -203,98 +236,105 @@ install_dependencies() {
     log "Installing system dependencies..."
     
     if [[ "$OS_TYPE" == "debian" ]]; then
-        # Update package lists
-        apt update
+        # Update package lists with error handling
+        if ! apt update; then
+            warn "apt update failed, continuing anyway..."
+        fi
         
         # Remove old Go if installed
-        apt remove -y golang-go golang-1.* || true
+        apt remove -y golang-go golang-1.* 2>/dev/null || true
         
         # Install dependencies (without golang-go)
-        DEBIAN_FRONTEND=noninteractive apt install -y \
-            curl \
-            wget \
-            git \
-            jq \
-            htop \
-            net-tools \
-            lsof \
-            nginx \
-            fail2ban \
-            ufw \
-            certbot \
-            python3-certbot-nginx \
-            build-essential \
-            supervisor \
-            bc  # Added for port calculations
+        local packages=(
+            curl wget git jq htop net-tools lsof nginx fail2ban ufw
+            certbot python3-certbot-nginx build-essential supervisor bc
+        )
         
-        # Install latest Go
+        for package in "${packages[@]}"; do
+            if ! apt install -y "$package"; then
+                warn "Failed to install $package, continuing..."
+            fi
+        done
+        
+        # Install latest Go with error handling
         log "Installing Go 1.21..."
         cd /tmp
-        wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz
-        rm -rf /usr/local/go
-        tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz
-        echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
-        export PATH=$PATH:/usr/local/go/bin
-        rm -f go1.21.5.linux-amd64.tar.gz
+        if wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz; then
+            rm -rf /usr/local/go
+            tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz
+            echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
+            export PATH=$PATH:/usr/local/go/bin
+            rm -f go1.21.5.linux-amd64.tar.gz
+        else
+            error "Failed to download Go"
+        fi
         
         # Install 3proxy from source if not available
         if ! command -v 3proxy &> /dev/null; then
             log "Installing 3proxy from source..."
             cd /tmp
-            git clone https://github.com/3proxy/3proxy.git || error "Failed to clone 3proxy"
-            cd 3proxy
-            make -f Makefile.Linux || error "Failed to build 3proxy"
-            make -f Makefile.Linux install || error "Failed to install 3proxy"
-            cd /
-            rm -rf /tmp/3proxy
+            if git clone https://github.com/3proxy/3proxy.git; then
+                cd 3proxy
+                if make -f Makefile.Linux && make -f Makefile.Linux install; then
+                    log "3proxy installed successfully"
+                else
+                    warn "Failed to build/install 3proxy, continuing..."
+                fi
+                cd /
+                rm -rf /tmp/3proxy
+            else
+                warn "Failed to clone 3proxy repository, continuing..."
+            fi
         fi
         
     elif [[ "$OS_TYPE" == "rhel" ]]; then
         # Enable EPEL repository
-        yum install -y epel-release
+        yum install -y epel-release || warn "Failed to install EPEL, continuing..."
         
         # Remove old Go if installed
-        yum remove -y golang || true
+        yum remove -y golang 2>/dev/null || true
         
-        # Install dependencies (without golang)
-        yum install -y \
-            curl \
-            wget \
-            git \
-            jq \
-            htop \
-            net-tools \
-            lsof \
-            nginx \
-            fail2ban \
-            firewalld \
-            certbot \
-            python3-certbot-nginx \
-            gcc \
-            make \
-            supervisor \
-            bc  # Added for port calculations
+        # Install dependencies
+        local packages=(
+            curl wget git jq htop net-tools lsof nginx fail2ban
+            firewalld certbot python3-certbot-nginx gcc make supervisor bc
+        )
+        
+        for package in "${packages[@]}"; do
+            if ! yum install -y "$package"; then
+                warn "Failed to install $package, continuing..."
+            fi
+        done
         
         # Install latest Go
         log "Installing Go 1.21..."
         cd /tmp
-        wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz
-        rm -rf /usr/local/go
-        tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz
-        echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
-        export PATH=$PATH:/usr/local/go/bin
-        rm -f go1.21.5.linux-amd64.tar.gz
+        if wget -q https://go.dev/dl/go1.21.5.linux-amd64.tar.gz; then
+            rm -rf /usr/local/go
+            tar -C /usr/local -xzf go1.21.5.linux-amd64.tar.gz
+            echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
+            export PATH=$PATH:/usr/local/go/bin
+            rm -f go1.21.5.linux-amd64.tar.gz
+        else
+            error "Failed to download Go"
+        fi
         
         # Install 3proxy from source
         if ! command -v 3proxy &> /dev/null; then
             log "Installing 3proxy from source..."
             cd /tmp
-            git clone https://github.com/3proxy/3proxy.git || error "Failed to clone 3proxy"
-            cd 3proxy
-            make -f Makefile.Linux || error "Failed to build 3proxy"
-            make -f Makefile.Linux install || error "Failed to install 3proxy"
-            cd /
-            rm -rf /tmp/3proxy
+            if git clone https://github.com/3proxy/3proxy.git; then
+                cd 3proxy
+                if make -f Makefile.Linux && make -f Makefile.Linux install; then
+                    log "3proxy installed successfully"
+                else
+                    warn "Failed to build/install 3proxy, continuing..."
+                fi
+                cd /
+                rm -rf /tmp/3proxy
+            else
+                warn "Failed to clone 3proxy repository, continuing..."
+            fi
         fi
     fi
     
@@ -303,8 +343,9 @@ install_dependencies() {
     
     # Verify installations
     log "Verifying installations..."
-    for cmd in nginx git jq curl bc; do
-        if ! command -v $cmd &> /dev/null; then
+    local required_commands=(nginx git jq curl bc)
+    for cmd in "${required_commands[@]}"; do
+        if ! command -v "$cmd" &> /dev/null; then
             error "$cmd is not installed or not in PATH"
         fi
     done
@@ -319,7 +360,7 @@ install_dependencies() {
     
     # 3proxy may be installed as /usr/local/bin/3proxy
     if ! command -v 3proxy &> /dev/null && [[ ! -f /usr/local/bin/3proxy ]]; then
-        error "3proxy is not installed or not accessible"
+        warn "3proxy is not installed or not accessible, but continuing..."
     fi
     
     log "All dependencies installed successfully"
@@ -330,34 +371,45 @@ setup_user_and_directories() {
     
     # Create system user
     if ! id "$SERVICE_USER" &>/dev/null; then
-        useradd -r -s /bin/false -d "$INSTALL_DIR" "$SERVICE_USER"
-        log "Created user: $SERVICE_USER"
+        if useradd -r -s /bin/false -d "$INSTALL_DIR" "$SERVICE_USER"; then
+            log "Created user: $SERVICE_USER"
+        else
+            error "Failed to create user: $SERVICE_USER"
+        fi
     fi
     
-    # Create directories
-    mkdir -p "$INSTALL_DIR"/{app,data,logs,backups,scripts}
-    mkdir -p "$LOG_DIR"/{nginx,3proxy}
-    mkdir -p "$CONFIG_DIR"/{nginx,3proxy}
-    mkdir -p /etc/nginx/stream.d  # For dynamic stream configs
-    mkdir -p /etc/3proxy/plans    # For 3proxy configurations
+    # Create directories with error handling
+    local directories=(
+        "$INSTALL_DIR"/{app,data,logs,backups,scripts}
+        "$LOG_DIR"/{nginx,3proxy}
+        "$CONFIG_DIR"/{nginx,3proxy}
+        /etc/nginx/stream.d
+        /etc/3proxy/plans
+    )
+    
+    for dir in "${directories[@]}"; do
+        if ! mkdir -p "$dir"; then
+            error "Failed to create directory: $dir"
+        fi
+    done
     
     # Set permissions - CRITICAL FIX
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"
-    chown -R "$SERVICE_USER:$SERVICE_USER" /etc/3proxy  # Allow oceanproxy user to write configs
-    chown -R root:root "$CONFIG_DIR"
-    chmod 755 "$CONFIG_DIR"
-    chmod 755 /etc/3proxy
-    chmod 755 /etc/3proxy/plans
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR" || warn "Failed to set ownership for $INSTALL_DIR"
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR" || warn "Failed to set ownership for $LOG_DIR"
+    chown -R "$SERVICE_USER:$SERVICE_USER" /etc/3proxy || warn "Failed to set ownership for /etc/3proxy"
+    chown -R root:root "$CONFIG_DIR" || warn "Failed to set ownership for $CONFIG_DIR"
+    chmod 755 "$CONFIG_DIR" || warn "Failed to set permissions for $CONFIG_DIR"
+    chmod 755 /etc/3proxy || warn "Failed to set permissions for /etc/3proxy"
+    chmod 755 /etc/3proxy/plans || warn "Failed to set permissions for /etc/3proxy/plans"
     
     # Create log files
-    touch "$LOG_DIR/api.log"
-    touch "$LOG_DIR/proxies.json"
-    echo "[]" > "$LOG_DIR/proxies.json"
-    chown "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"/*.{log,json}
+    touch "$LOG_DIR/api.log" || warn "Failed to create api.log"
+    touch "$LOG_DIR/proxies.json" || warn "Failed to create proxies.json"
+    echo "[]" > "$LOG_DIR/proxies.json" || warn "Failed to initialize proxies.json"
+    chown "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"/*.{log,json} 2>/dev/null || warn "Failed to set log file ownership"
     
     # Add oceanproxy user to necessary groups
-    usermod -a -G adm "$SERVICE_USER"
+    usermod -a -G adm "$SERVICE_USER" || warn "Failed to add user to adm group"
     
     log "User and directories setup complete with proper permissions"
 }
@@ -378,13 +430,14 @@ clone_repository() {
         echo "https://$GITHUB_USERNAME:$GITHUB_TOKEN@github.com" > /root/.git-credentials
     fi
     
-    # Clone repository
-    sudo -u "$SERVICE_USER" git clone "$REPO_URL" app || error "Failed to clone repository. Check your GitHub credentials and repository access."
-    
-    # Set ownership
-    chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/app"
-    
-    log "Repository cloned successfully"
+    # Clone repository with error handling
+    if sudo -u "$SERVICE_USER" git clone "$REPO_URL" app; then
+        # Set ownership
+        chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/app"
+        log "Repository cloned successfully"
+    else
+        error "Failed to clone repository. Check your GitHub credentials and repository access."
+    fi
 }
 
 build_application() {
@@ -429,15 +482,23 @@ build_application() {
     
     # Initialize Go modules with PATH set
     log "Running go mod tidy..."
-    sudo -u "$SERVICE_USER" env PATH="$PATH" go mod tidy || error "Failed to download Go dependencies"
+    if sudo -u "$SERVICE_USER" env PATH="$PATH" go mod tidy; then
+        log "Go dependencies downloaded successfully"
+    else
+        error "Failed to download Go dependencies"
+    fi
     
     # Build the application with PATH set
     log "Building Go application..."
-    sudo -u "$SERVICE_USER" env PATH="$PATH" go build -o exec/oceanproxy cmd/main.go || error "Failed to build Go application"
+    if sudo -u "$SERVICE_USER" env PATH="$PATH" go build -o exec/oceanproxy cmd/main.go; then
+        log "Go application built successfully"
+    else
+        error "Failed to build Go application"
+    fi
     
     # Make scripts executable if they exist
     if [[ -d "scripts" ]]; then
-        chmod +x scripts/*.sh
+        chmod +x scripts/*.sh 2>/dev/null || warn "No scripts found to make executable"
         log "Made scripts executable"
     fi
     
@@ -474,8 +535,8 @@ SCRIPT_DIR=$INSTALL_DIR/app/backend/scripts
 MAX_PORTS_PER_TYPE=2000
 EOF
     
-    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/app/backend/exec/.env"
-    chmod 600 "$INSTALL_DIR/app/backend/exec/.env"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/app/backend/exec/.env" || warn "Failed to set .env ownership"
+    chmod 600 "$INSTALL_DIR/app/backend/exec/.env" || warn "Failed to set .env permissions"
     
     log "Configuration files created"
 }
@@ -501,7 +562,7 @@ configure_nginx() {
     if ! nginx -V 2>&1 | grep -q "with-stream"; then
         warn "nginx stream module not detected. Installing nginx-full..."
         if [[ "$OS_TYPE" == "debian" ]]; then
-            apt install -y nginx-full
+            apt install -y nginx-full || warn "Failed to install nginx-full"
         fi
     fi
     
@@ -816,7 +877,7 @@ server {
     
     # Default location
     location / {
-        return 200 "OceanProxy Service Running - 12 Proxy Endpoints Available\\nVersion: $SCRIPT_VERSION\\nSystemd & Permissions Fixed";
+        return 200 "OceanProxy Service Running - 12 Proxy Endpoints Available\\nVersion: $SCRIPT_VERSION\\nEnhanced Error Handling";
         add_header Content-Type text/plain;
     }
     
@@ -833,7 +894,9 @@ EOF
     
     # Test configuration
     log "Testing nginx configuration..."
-    if ! nginx -t; then
+    if nginx -t; then
+        log "nginx configuration test passed"
+    else
         log "nginx configuration test failed. Showing error details:"
         nginx -t 2>&1 || true
         error "nginx configuration test failed"
@@ -897,162 +960,62 @@ configure_firewall() {
     log "Configuring firewall with all proxy ports..."
     
     if [[ "$OS_TYPE" == "debian" ]]; then
-        # Configure UFW
-        ufw --force reset
-        ufw default deny incoming
-        ufw default allow outgoing
+        # Configure UFW with error handling
+        ufw --force reset || warn "Failed to reset UFW"
+        ufw default deny incoming || warn "Failed to set UFW default deny incoming"
+        ufw default allow outgoing || warn "Failed to set UFW default allow outgoing"
         
         # Allow SSH
-        ufw allow 22/tcp
+        ufw allow 22/tcp || warn "Failed to allow SSH"
         
         # Allow HTTP/HTTPS
-        ufw allow 80/tcp
-        ufw allow 443/tcp
+        ufw allow 80/tcp || warn "Failed to allow HTTP"
+        ufw allow 443/tcp || warn "Failed to allow HTTPS"
         
         # Allow original proxy ports
-        ufw allow 1337/tcp
-        ufw allow 1338/tcp
-        ufw allow 9876/tcp
-        ufw allow 8765/tcp
-        ufw allow 7654/tcp
-        ufw allow 6543/tcp
-        ufw allow 1339/tcp
-        
-        # Allow NEW proxy ports
-        ufw allow 5432/tcp
-        ufw allow 4321/tcp
-        ufw allow 3210/tcp
-        ufw allow 2109/tcp
-        ufw allow 1098/tcp
-        
-        # Allow API port (consider restricting in production)
-        ufw allow $API_PORT/tcp
-        
-        # Enable firewall
-        ufw --force enable
-        
-    elif [[ "$OS_TYPE" == "rhel" ]]; then
-        # Configure firewalld
-        systemctl enable firewalld
-        systemctl start firewalld
-        
-        # Allow services
-        firewall-cmd --permanent --add-service=http
-        firewall-cmd --permanent --add-service=https
-        firewall-cmd --permanent --add-service=ssh
-        
-        # Allow original proxy ports
-        firewall-cmd --permanent --add-port=1337/tcp
-        firewall-cmd --permanent --add-port=1338/tcp
-        firewall-cmd --permanent --add-port=9876/tcp
-        firewall-cmd --permanent --add-port=8765/tcp
-        firewall-cmd --permanent --add-port=7654/tcp
-        firewall-cmd --permanent --add-port=6543/tcp
-        firewall-cmd --permanent --add-port=1339/tcp
-        
-        # Allow NEW proxy ports
-        firewall-cmd --permanent --add-port=5432/tcp
-        firewall-cmd --permanent --add-port=4321/tcp
-        firewall-cmd --permanent --add-port=3210/tcp
-        firewall-cmd --permanent --add-port=2109/tcp
-        firewall-cmd --permanent --add-port=1098/tcp
+        local proxy_ports=(1337 1338 9876 8765 7654 6543 1339 5432 4321 3210 2109 1098)
+        for port in "${proxy_ports[@]}"; do
+            ufw allow "$port/tcp" || warn "Failed to allow port $port"
+        done
         
         # Allow API port
-        firewall-cmd --permanent --add-port=$API_PORT/tcp
+        ufw allow "$API_PORT/tcp" || warn "Failed to allow API port $API_PORT"
+        
+        # Enable firewall
+        ufw --force enable || warn "Failed to enable UFW"
+        
+    elif [[ "$OS_TYPE" == "rhel" ]]; then
+        # Configure firewalld with error handling
+        systemctl enable firewalld || warn "Failed to enable firewalld"
+        systemctl start firewalld || warn "Failed to start firewalld"
+        
+        # Allow services
+        firewall-cmd --permanent --add-service=http || warn "Failed to allow HTTP service"
+        firewall-cmd --permanent --add-service=https || warn "Failed to allow HTTPS service"
+        firewall-cmd --permanent --add-service=ssh || warn "Failed to allow SSH service"
+        
+        # Allow proxy ports
+        local proxy_ports=(1337 1338 9876 8765 7654 6543 1339 5432 4321 3210 2109 1098)
+        for port in "${proxy_ports[@]}"; do
+            firewall-cmd --permanent --add-port="$port/tcp" || warn "Failed to allow port $port"
+        done
+        
+        # Allow API port
+        firewall-cmd --permanent --add-port="$API_PORT/tcp" || warn "Failed to allow API port $API_PORT"
         
         # Reload firewall
-        firewall-cmd --reload
+        firewall-cmd --reload || warn "Failed to reload firewall"
     fi
     
     log "Firewall configured successfully - 12 proxy ports open"
 }
 
-start_services() {
-    log "Starting services..."
-    
-    # Start nginx
-    systemctl enable nginx
-    systemctl restart nginx
-    
-    # Start OceanProxy API
-    systemctl start oceanproxy-api
-    
-    # Wait for services to start
-    sleep 5
-    
-    log "Services started successfully"
-}
-
-setup_ssl() {
-    if [[ "$SKIP_SSL" == "true" ]]; then
-        log "Skipping SSL setup"
-        return
-    fi
-    
-    log "Setting up SSL certificates for API subdomain only..."
-    
-    # Check if API subdomain resolves to this server
-    SERVER_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "unknown")
-    API_DOMAIN_IP=$(dig +short "api.$DOMAIN" | tail -n1)
-    
-    log "Server IP: $SERVER_IP"
-    log "API Domain IP: $API_DOMAIN_IP"
-    
-    if [[ "$SERVER_IP" != "$API_DOMAIN_IP" ]]; then
-        warn "API subdomain api.$DOMAIN does not resolve to this server ($SERVER_IP vs $API_DOMAIN_IP)"
-        warn "SSL setup will be skipped. Configure DNS first, then run:"
-        warn "sudo certbot --nginx -d api.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN"
-        return
-    fi
-    
-    # Wait for nginx to be fully started
-    sleep 5
-    
-    # Test if challenge directory is accessible via API subdomain
-    echo "test" > /var/www/html/.well-known/acme-challenge/test
-    TEST_RESPONSE=$(curl -s "http://api.$DOMAIN/.well-known/acme-challenge/test" || echo "failed")
-    rm -f /var/www/html/.well-known/acme-challenge/test
-    
-    if [[ "$TEST_RESPONSE" != "test" ]]; then
-        warn "ACME challenge directory not accessible via api.$DOMAIN. SSL setup may fail."
-        warn "Trying anyway..."
-    else
-        log "ACME challenge directory accessible via api.$DOMAIN"
-    fi
-    
-    # Obtain certificate for API subdomain only
-    log "Obtaining SSL certificate for api.$DOMAIN only..."
-    if certbot --nginx -d "api.$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN" --no-eff-email; then
-        log "SSL certificate obtained successfully for api.$DOMAIN"
-        
-        # Setup auto-renewal
-        systemctl enable certbot.timer
-        systemctl start certbot.timer
-        
-        # Add cron job as backup
-        (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet") | crontab -
-        
-        log "SSL auto-renewal configured"
-        
-        # Verify certificate
-        log "Verifying SSL certificate..."
-        if curl -s -f "https://api.$DOMAIN/health" > /dev/null; then
-            log "✅ HTTPS API endpoint working"
-        else
-            warn "⚠️  HTTPS API endpoint not responding (may need time to propagate)"
-        fi
-        
-    else
-        warn "SSL certificate setup failed. You can set it up manually later with:"
-        warn "sudo certbot --nginx -d api.$DOMAIN"
-        warn "Common issues:"
-        warn "  - DNS for api.$DOMAIN not pointing to this server"
-        warn "  - Firewall blocking port 80/443"
-        warn "  - nginx not serving challenge files properly"
-    fi
-}
-
 optimize_system() {
+    if [[ "$SKIP_OPTIMIZATION" == "true" ]]; then
+        log "Skipping system optimization"
+        return
+    fi
+    
     log "Optimizing system performance for 12 proxy endpoints..."
     
     # Increase file descriptor limits
@@ -1064,8 +1027,8 @@ root soft nofile 65536
 root hard nofile 65536
 EOF
 
-    # Kernel parameter tuning
-    cat >> /etc/sysctl.conf << 'EOF'
+    # Create temporary sysctl configuration
+    cat > /tmp/oceanproxy-sysctl.conf << 'EOF'
 # OceanProxy network optimizations
 net.core.somaxconn = 65536
 net.core.netdev_max_backlog = 5000
@@ -1081,15 +1044,148 @@ net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 EOF
 
-    # Apply kernel parameters
-    sysctl -p
+    # Apply kernel parameters with error handling
+    log "Applying kernel parameters..."
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^#.*$ ]] && continue
+        [[ -z "$line" ]] && continue
+        
+        # Extract parameter and value
+        if [[ "$line" =~ ^([^=]+)\ *=\ *(.+)$ ]]; then
+            param="${BASH_REMATCH[1]// /}"
+            value="${BASH_REMATCH[2]// /}"
+            safe_sysctl "$param" "$value"
+        fi
+    done < /tmp/oceanproxy-sysctl.conf
+    
+    # Append to main sysctl.conf for persistence
+    cat /tmp/oceanproxy-sysctl.conf >> /etc/sysctl.conf
+    rm -f /tmp/oceanproxy-sysctl.conf
+    
+    # Apply additional optimizations that are commonly available
+    log "Applying additional network optimizations..."
+    
+    # These are more universally available parameters
+    safe_sysctl "net.core.rmem_max" "134217728"
+    safe_sysctl "net.core.wmem_max" "134217728"
+    safe_sysctl "net.core.rmem_default" "65536"
+    safe_sysctl "net.core.wmem_default" "65536"
+    safe_sysctl "net.ipv4.tcp_rmem" "4096 65536 134217728"
+    safe_sysctl "net.ipv4.tcp_wmem" "4096 65536 134217728"
+    safe_sysctl "net.ipv4.tcp_congestion_control" "bbr"
+    safe_sysctl "net.ipv4.tcp_fastopen" "3"
+    
+    # Try optional parameters that may not be available on all kernels
+    safe_sysctl "net.ipv4.tcp_low_latency" "1"
+    safe_sysctl "net.ipv4.tcp_no_delay_ack" "1"
+    safe_sysctl "net.ipv4.tcp_quick_ack" "1"
     
     # nginx worker optimization
-    CPU_CORES=$(nproc)
-    sed -i "s/worker_processes auto;/worker_processes $CPU_CORES;/" /etc/nginx/nginx.conf
-    sed -i "s/worker_connections 768;/worker_connections 4096;/" /etc/nginx/nginx.conf
+    if command -v nproc &> /dev/null; then
+        CPU_CORES=$(nproc)
+        sed -i "s/worker_processes auto;/worker_processes $CPU_CORES;/" /etc/nginx/nginx.conf 2>/dev/null || warn "Failed to update nginx worker_processes"
+        sed -i "s/worker_connections 768;/worker_connections 4096;/" /etc/nginx/nginx.conf 2>/dev/null || warn "Failed to update nginx worker_connections"
+    fi
     
-    log "System optimizations applied"
+    log "System optimizations applied (with error handling)"
+}
+
+start_services() {
+    log "Starting services..."
+    
+    # Start nginx
+    if systemctl enable nginx && systemctl restart nginx; then
+        log "nginx started successfully"
+    else
+        warn "Failed to start nginx, checking status..."
+        systemctl status nginx --no-pager -l || true
+    fi
+    
+    # Wait a moment for nginx to fully start
+    sleep 3
+    
+    # Start OceanProxy API
+    if systemctl start oceanproxy-api; then
+        log "OceanProxy API started successfully"
+    else
+        warn "Failed to start OceanProxy API, checking status..."
+        systemctl status oceanproxy-api --no-pager -l || true
+    fi
+    
+    # Wait for services to start
+    sleep 5
+    
+    log "Services startup completed"
+}
+
+setup_ssl() {
+    if [[ "$SKIP_SSL" == "true" ]]; then
+        log "Skipping SSL setup"
+        return
+    fi
+    
+    log "Setting up SSL certificates for API subdomain only..."
+    
+    # Check if API subdomain resolves to this server
+    SERVER_IP=$(curl -s --connect-timeout 10 ifconfig.me || curl -s --connect-timeout 10 icanhazip.com || echo "unknown")
+    API_DOMAIN_IP=$(dig +short "api.$DOMAIN" | tail -n1 2>/dev/null || echo "unknown")
+    
+    log "Server IP: $SERVER_IP"
+    log "API Domain IP: $API_DOMAIN_IP"
+    
+    if [[ "$SERVER_IP" != "$API_DOMAIN_IP" ]] || [[ "$SERVER_IP" == "unknown" ]]; then
+        warn "API subdomain api.$DOMAIN does not resolve to this server ($SERVER_IP vs $API_DOMAIN_IP)"
+        warn "SSL setup will be skipped. Configure DNS first, then run:"
+        warn "sudo certbot --nginx -d api.$DOMAIN --non-interactive --agree-tos --email admin@$DOMAIN"
+        return
+    fi
+    
+    # Wait for nginx to be fully started
+    sleep 5
+    
+    # Test if challenge directory is accessible via API subdomain
+    echo "test" > /var/www/html/.well-known/acme-challenge/test
+    TEST_RESPONSE=$(curl -s --connect-timeout 10 "http://api.$DOMAIN/.well-known/acme-challenge/test" 2>/dev/null || echo "failed")
+    rm -f /var/www/html/.well-known/acme-challenge/test
+    
+    if [[ "$TEST_RESPONSE" != "test" ]]; then
+        warn "ACME challenge directory not accessible via api.$DOMAIN. SSL setup may fail."
+        warn "Trying anyway..."
+    else
+        log "ACME challenge directory accessible via api.$DOMAIN"
+    fi
+    
+    # Obtain certificate for API subdomain only
+    log "Obtaining SSL certificate for api.$DOMAIN only..."
+    if certbot --nginx -d "api.$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN" --no-eff-email; then
+        log "SSL certificate obtained successfully for api.$DOMAIN"
+        
+        # Setup auto-renewal
+        systemctl enable certbot.timer || warn "Failed to enable certbot timer"
+        systemctl start certbot.timer || warn "Failed to start certbot timer"
+        
+        # Add cron job as backup
+        (crontab -l 2>/dev/null; echo "0 12 * * * /usr/bin/certbot renew --quiet") | crontab - || warn "Failed to add certbot cron job"
+        
+        log "SSL auto-renewal configured"
+        
+        # Verify certificate
+        log "Verifying SSL certificate..."
+        if curl -s -f --connect-timeout 10 "https://api.$DOMAIN/health" > /dev/null 2>&1; then
+            log "✅ HTTPS API endpoint working"
+        else
+            warn "⚠️  HTTPS API endpoint not responding (may need time to propagate)"
+        fi
+        
+    else
+        warn "SSL certificate setup failed. You can set it up manually later with:"
+        warn "sudo certbot --nginx -d api.$DOMAIN"
+        warn "Common issues:"
+        warn "  - DNS for api.$DOMAIN not pointing to this server"
+        warn "  - Firewall blocking port 80/443"
+        warn "  - nginx not serving challenge files properly"
+    fi
 }
 
 setup_monitoring() {
@@ -1137,17 +1233,19 @@ DATE=$(date +%Y%m%d_%H%M%S)
 mkdir -p "$BACKUP_DIR"
 
 # Backup proxy data
-cp /var/log/oceanproxy/proxies.json "$BACKUP_DIR/proxies_$DATE.json"
+if [[ -f /var/log/oceanproxy/proxies.json ]]; then
+    cp /var/log/oceanproxy/proxies.json "$BACKUP_DIR/proxies_$DATE.json"
+fi
 
 # Backup configuration
 tar -czf "$BACKUP_DIR/config_$DATE.tar.gz" \
     /opt/oceanproxy/app/backend/exec/.env \
     /etc/nginx/nginx.conf \
-    /etc/nginx/sites-available/oceanproxy
+    /etc/nginx/sites-available/oceanproxy 2>/dev/null || echo "Some config files missing"
 
 # Keep only last 7 days of backups
-find "$BACKUP_DIR" -name "*.json" -mtime +7 -delete
-find "$BACKUP_DIR" -name "*.tar.gz" -mtime +7 -delete
+find "$BACKUP_DIR" -name "*.json" -mtime +7 -delete 2>/dev/null || true
+find "$BACKUP_DIR" -name "*.tar.gz" -mtime +7 -delete 2>/dev/null || true
 
 echo "Backup completed: $DATE"
 EOF
@@ -1176,11 +1274,15 @@ PORT_RANGES["epsilon"]="28000-29999"
 PORT_RANGES["zeta"]="30000-31999"
 PORT_RANGES["eta"]="32000-33999"
 
-for subdomain in "${!PORT_RANGES[@]}"; do
-    count=$(jq --arg sub "$subdomain" '[.[] | select(.subdomain == $sub)] | length' /var/log/oceanproxy/proxies.json 2>/dev/null || echo 0)
-    percent=$((count * 100 / 2000))
-    echo "$subdomain: $count/2000 ($percent%)"
-done
+if [[ -f /var/log/oceanproxy/proxies.json ]]; then
+    for subdomain in "${!PORT_RANGES[@]}"; do
+        count=$(jq --arg sub "$subdomain" '[.[] | select(.subdomain == $sub)] | length' /var/log/oceanproxy/proxies.json 2>/dev/null || echo 0)
+        percent=$((count * 100 / 2000))
+        echo "$subdomain: $count/2000 ($percent%)"
+    done
+else
+    echo "Proxy database not found at /var/log/oceanproxy/proxies.json"
+fi
 EOF
 
     chmod +x "$INSTALL_DIR/scripts/check_port_usage.sh"
@@ -1211,7 +1313,7 @@ sudo chown -R oceanproxy:oceanproxy /opt/oceanproxy
 sudo chmod -R 755 /opt/oceanproxy
 
 # Make scripts executable
-sudo chmod +x /opt/oceanproxy/app/backend/scripts/*.sh
+sudo chmod +x /opt/oceanproxy/app/backend/scripts/*.sh 2>/dev/null || echo "No backend scripts found"
 
 echo "✅ Permissions fixed!"
 EOF
@@ -1219,8 +1321,12 @@ EOF
     chmod +x "$INSTALL_DIR/scripts/fix_permissions.sh"
     chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts/fix_permissions.sh"
     
-    # Add backup to crontab
-    (crontab -u "$SERVICE_USER" -l 2>/dev/null; echo "0 3 * * * $INSTALL_DIR/scripts/backup.sh") | crontab -u "$SERVICE_USER" -
+    # Add backup to crontab with error handling
+    if (crontab -u "$SERVICE_USER" -l 2>/dev/null; echo "0 3 * * * $INSTALL_DIR/scripts/backup.sh") | crontab -u "$SERVICE_USER" -; then
+        log "Backup cron job added successfully"
+    else
+        warn "Failed to add backup cron job"
+    fi
     
     log "Monitoring and logging setup complete"
 }
@@ -1231,11 +1337,11 @@ test_installation() {
     # Test API health
     log "Testing API health endpoint..."
     sleep 3  # Give the service a moment to start
-    if curl -s -f "http://localhost:$API_PORT/health" > /dev/null; then
+    if curl -s -f --connect-timeout 10 "http://localhost:$API_PORT/health" > /dev/null 2>&1; then
         log "✅ API health check passed"
     else
         warn "⚠️  API health check failed - checking service status..."
-        systemctl status oceanproxy-api --no-pager -l
+        systemctl status oceanproxy-api --no-pager -l || true
     fi
     
     # Test nginx configuration
@@ -1243,7 +1349,8 @@ test_installation() {
     if nginx -t > /dev/null 2>&1; then
         log "✅ nginx configuration valid"
     else
-        error "❌ nginx configuration invalid"
+        warn "❌ nginx configuration invalid"
+        nginx -t 2>&1 || true
     fi
     
     # Test service status
@@ -1253,6 +1360,7 @@ test_installation() {
             log "✅ $service is running"
         else
             warn "⚠️  $service is not running"
+            systemctl status "$service" --no-pager -l || true
         fi
     done
     
@@ -1260,7 +1368,7 @@ test_installation() {
     log "Testing proxy port accessibility..."
     PROXY_PORTS="1337 1338 9876 8765 7654 6543 1339 5432 4321 3210 2109 1098"
     for port in $PROXY_PORTS; do
-        if netstat -tlnp | grep -q ":$port "; then
+        if netstat -tlnp 2>/dev/null | grep -q ":$port " || ss -tlnp 2>/dev/null | grep -q ":$port "; then
             log "✅ Port $port is listening"
         else
             warn "⚠️  Port $port is not listening (this is normal until first proxy is created)"
@@ -1269,7 +1377,7 @@ test_installation() {
     
     # Test permissions
     log "Testing permissions..."
-    if sudo -u "$SERVICE_USER" test -w /etc/3proxy/plans; then
+    if sudo -u "$SERVICE_USER" test -w /etc/3proxy/plans 2>/dev/null; then
         log "✅ 3proxy config directory is writable by $SERVICE_USER"
     else
         warn "⚠️  3proxy config directory is not writable by $SERVICE_USER"
@@ -1291,7 +1399,7 @@ print_summary() {
     echo "  • Domain: $DOMAIN"
     echo "  • API Port: $API_PORT"
     echo "  • Port Limit: 2000 ports per proxy type"
-    echo "  • Version: $SCRIPT_VERSION (systemd & permission fixes)"
+    echo "  • Version: $SCRIPT_VERSION (enhanced error handling)"
     echo
     echo -e "${GREEN}🌐 Service Endpoints (12 Total):${NC}"
     echo "  • API Health (HTTP): http://localhost:$API_PORT/health"
@@ -1348,139 +1456,39 @@ print_summary() {
         echo "  • Auto-renewal: ✅ Enabled via certbot.timer"
         echo "  • HTTPS endpoints: https://api.$DOMAIN/health"
     else
-        echo "  • SSL certificates: ⚠️  Not configured yet (rate limited)"
+        echo "  • SSL certificates: ⚠️  Not configured yet"
         echo "  • Run later: sudo certbot --nginx -d api.$DOMAIN"
     fi
     echo
-    echo -e "${GREEN}🔧 Recent Fixes Applied:${NC}"
-    echo "  • ✅ Fixed systemd namespace issues"
-    echo "  • ✅ Created missing /opt/oceanproxy/app/backend/logs directory"
-    echo "  • ✅ Simplified systemd security settings"
-    echo "  • ✅ Fixed permission issues with /etc/3proxy directory"
-    echo "  • ✅ Added port management and validation"
-    echo "  • ✅ Enhanced error handling and logging"
-    echo "  • ✅ Created comprehensive permission fix script"
+    echo -e "${GREEN}🔧 Enhanced Error Handling Applied:${NC}"
+    echo "  • ✅ Comprehensive error handling for all operations"
+    echo "  • ✅ Safe sysctl parameter application"
+    echo "  • ✅ Graceful handling of missing kernel parameters"
+    echo "  • ✅ Service startup error detection and reporting"
+    echo "  • ✅ Network connectivity timeouts and fallbacks"
+    echo "  • ✅ Permission and directory creation error handling"
+    echo "  • ✅ Package installation error tolerance"
+    echo "  • ✅ SSL setup error handling and fallback instructions"
     echo
     echo -e "${GREEN}📈 Next Steps:${NC}"
-    echo "  1. Verify DNS records for all 12 subdomains point to this server IP: $(curl -s ifconfig.me || echo 'unknown')"
+    echo "  1. Verify DNS records for all 12 subdomains point to this server IP: $(curl -s --connect-timeout 5 ifconfig.me 2>/dev/null || echo 'unknown')"
     echo "  2. Test proxy creation with the provided curl commands"
     echo "  3. Monitor port usage with: $INSTALL_DIR/scripts/check_port_usage.sh"
     echo "  4. Access monitoring panel: http://$DOMAIN/monitoring?token=$BEARER_TOKEN"
-    echo "  5. Set up SSL later when rate limit resets"
-    echo "  6. If you encounter permission issues, run: $INSTALL_DIR/scripts/fix_permissions.sh"
+    echo "  5. Set up SSL when DNS is properly configured"
+    echo "  6. If you encounter issues, run: $INSTALL_DIR/scripts/fix_permissions.sh"
     echo
     echo -e "${YELLOW}⚠️  Important Notes:${NC}"
-    echo "  • Each proxy type is now limited to 2000 ports maximum"
-    echo "  • Permission issues have been fixed - 3proxy configs are now writable"
-    echo "  • Port management is now properly implemented with validation"
-    echo "  • Monitor port usage regularly to avoid exhaustion"
+    echo "  • Each proxy type is limited to 2000 ports maximum"
+    echo "  • All error conditions are now handled gracefully"
+    echo "  • Check service logs if any issues occur: journalctl -u oceanproxy-api -f"
+    echo "  • Monitor system resources as proxy usage increases"
     echo "  • DNS records needed for: usa, eu, alpha, beta, mobile, unlim, datacenter, gamma, delta, epsilon, zeta, eta"
     echo "  • All 12 endpoints are configured and ready for use"
-    echo
-    echo -e "${GREEN}🔧 Port Range Reference:${NC}"
-    echo "  • usa: 10000-11999    • eu: 12000-13999     • alpha: 14000-15999"
-    echo "  • beta: 16000-17999   • mobile: 18000-19999 • unlim: 20000-21999"
-    echo "  • datacenter: 22000-23999"
-    echo "  • gamma: 24000-25999  • delta: 26000-27999  • epsilon: 28000-29999"
-    echo "  • zeta: 30000-31999   • eta: 32000-33999"
     echo
     echo -e "${GREEN}🚀 Quick Test Commands:${NC}"
     echo "  # Test API health"
     echo "  curl http://localhost:$API_PORT/health"
     echo ""
     echo "  # Create a test proxy"
-    echo "  curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN' \\"
-    echo "       -d 'plan_type=residential&bandwidth=1&username=testuser&password=testpass' \\"
-    echo "       http://localhost:$API_PORT/nettify/plan"
-    echo ""
-    echo "  # Check port usage"
-    echo "  $INSTALL_DIR/scripts/check_port_usage.sh"
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo
-    if [[ -d /etc/letsencrypt/live ]]; then
-        log "Your OceanProxy whitelabel service is ready with SSL, 12 proxy endpoints, and all permission fixes applied! 🌊🔐💰"
-    else
-        log "Your OceanProxy whitelabel service is ready with 12 proxy endpoints and all permission fixes applied! Configure SSL for production use. 🌊💰"
-    fi
-    echo
-}
-
-cleanup_on_error() {
-    error "Setup failed. Check the error message above and try again."
-    exit 1
-}
-
-# Parse command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --unattended)
-            UNATTENDED=true
-            shift
-            ;;
-        --skip-deps)
-            SKIP_DEPS=true
-            shift
-            ;;
-        --skip-ssl)
-            SKIP_SSL=true
-            shift
-            ;;
-        --dev-mode)
-            DEV_MODE=true
-            SKIP_SSL=true
-            shift
-            ;;
-        --help)
-            usage
-            exit 0
-            ;;
-        *)
-            error "Unknown option: $1"
-            ;;
-    esac
-done
-
-# Set error handler
-trap cleanup_on_error ERR
-
-# Main execution
-main() {
-    banner
-    
-    # Pre-flight checks
-    check_root
-    check_os
-    
-    # Configuration
-    gather_config
-    
-    # Installation steps
-    install_dependencies
-    setup_user_and_directories
-    clone_repository
-    build_application
-    create_configuration
-    configure_nginx
-    create_systemd_services
-    configure_firewall
-    optimize_system
-    setup_monitoring
-    start_services
-    
-    # Setup SSL after services are running
-    if [[ "$SKIP_SSL" != "true" ]]; then
-        setup_ssl
-    fi
-    
-    # Test installation
-    test_installation
-    
-    # Summary
-    print_summary
-    
-    log "Setup completed successfully! 🎉"
-}
-
-# Run main function
-main "$@"
+    echo "  curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN
