@@ -1491,4 +1491,3 @@ print_summary() {
     echo "  curl http://localhost:$API_PORT/health"
     echo ""
     echo "  # Create a test proxy"
-    echo "  curl -X POST -H 'Authorization: Bearer $BEARER_TOKEN"
