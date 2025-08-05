@@ -179,3 +179,41 @@ func CreateNettifyPlan(form url.Values) (*NettifyPlanInfo, error) {
 		Proxies:   proxies,
 	}, nil
 }
+
+type NettifyPlan struct {
+	PlanID    string `json:"plan_id"`
+	Username  string `json:"username"`
+	PlanType  string `json:"plan_type"`
+	MaxBytes  int64  `json:"max_bytes"`
+	UsedBytes int64  `json:"used_bytes"`
+	Enabled   bool   `json:"enabled"`
+	Active    bool   `json:"active"`
+	LastUsed  string `json:"last_used"`
+}
+
+// RetreiveAllPlans fetches all plans from Nettify API
+func RetreiveAllPlans() ([]NettifyPlan, error) {
+	apiURL := "https://api.nettify.xyz/plans"
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+config.NettifyAPIKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("API error: %d %s", resp.StatusCode, string(body))
+	}
+
+	var plans []NettifyPlan
+	if err := json.NewDecoder(resp.Body).Decode(&plans); err != nil {
+		return nil, err
+	}
+	return plans, nil
+}
